@@ -13,6 +13,9 @@ Bot Discord em Python com comandos *slash* organizados em **cogs**, moderação 
   - `/clear <quantidade>`
   - `/kick <membro> [motivo]`
   - `/ban <membro> [motivo]`
+  - `/unban <user_id> [motivo]`
+  - `/timeout <membro> <duracao> [motivo]` (ex.: `30m`, `2h`, `1d`)
+  - `/untimeout <membro> [motivo]`
   - `/restaurar` (somente dono do sistema)
 - Logs no terminal e em arquivo (`logs/bot.log`)
 - Tratamento global de erros para comandos *slash*
@@ -73,6 +76,7 @@ Para os comandos de moderação funcionarem corretamente, conceda ao bot:
 - Manage Channels
 - Kick Members
 - Ban Members
+- Moderate Members
 
 ## Logs e erros
 - Os logs são gravados no console e em `logs/bot.log` (com rotação automática).

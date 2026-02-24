@@ -54,6 +54,27 @@ COMMAND_DETAILS: dict[str, dict[str, str]] = {
         "escopo": "Apenas servidor",
         "detalhes": "Bane um membro respeitando hierarquia de cargos.",
     },
+    "unban": {
+        "categoria": "Moderacao",
+        "uso": "/unban <user_id> [reason]",
+        "permissoes": "Ban Members",
+        "escopo": "Apenas servidor",
+        "detalhes": "Remove o banimento de um usuario pelo ID.",
+    },
+    "timeout": {
+        "categoria": "Moderacao",
+        "uso": "/timeout <member> <duration> [reason]",
+        "permissoes": "Moderate Members",
+        "escopo": "Apenas servidor",
+        "detalhes": "Aplica timeout com duracao em `s`, `m`, `h` ou `d`.",
+    },
+    "untimeout": {
+        "categoria": "Moderacao",
+        "uso": "/untimeout <member> [reason]",
+        "permissoes": "Moderate Members",
+        "escopo": "Apenas servidor",
+        "detalhes": "Remove o timeout ativo de um membro.",
+    },
     "restaurar": {
         "categoria": "Moderacao",
         "uso": "/restaurar",

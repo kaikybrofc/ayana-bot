@@ -1,4 +1,6 @@
 import logging
+import re
+from datetime import timedelta
 
 import discord
 from discord import app_commands
@@ -15,6 +17,38 @@ class ModerationCog(commands.Cog):
     def _build_reason(actor: discord.Member, reason: str | None) -> str:
         base = reason.strip() if reason else "Sem motivo informado."
         return f"{base} | Acao por {actor} ({actor.id})"
+
+    @staticmethod
+    def _parse_discord_id(raw_value: str) -> int | None:
+        cleaned = raw_value.strip()
+        match = re.search(r"\d{17,20}", cleaned)
+        if match is None:
+            return None
+
+        try:
+            return int(match.group())
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _parse_duration(raw_value: str) -> timedelta | None:
+        compact = raw_value.lower().replace(" ", "")
+        match = re.fullmatch(r"(\d+)([smhd])", compact)
+        if match is None:
+            return None
+
+        amount = int(match.group(1))
+        unit = match.group(2)
+        if amount <= 0:
+            return None
+
+        multipliers = {
+            "s": 1,
+            "m": 60,
+            "h": 60 * 60,
+            "d": 60 * 60 * 24,
+        }
+        return timedelta(seconds=amount * multipliers[unit])
 
     @staticmethod
     def _can_moderate(
@@ -128,6 +162,154 @@ class ModerationCog(commands.Cog):
         await member.ban(reason=audit_reason, delete_message_days=0)
         await interaction.response.send_message(
             f"{member.mention} foi banido.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="unban", description="Remove o banimento de um usuario pelo ID.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(ban_members=True)
+    @app_commands.checks.has_permissions(ban_members=True)
+    @app_commands.checks.bot_has_permissions(ban_members=True)
+    @app_commands.describe(
+        user="ID ou mencao do usuario para desbanir.",
+        reason="Motivo do desbanimento.",
+    )
+    async def unban(
+        self,
+        interaction: discord.Interaction,
+        user: str,
+        reason: str | None = None,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                "Este comando so funciona em servidor.",
+                ephemeral=True,
+            )
+            return
+
+        user_id = self._parse_discord_id(user)
+        if user_id is None:
+            await interaction.response.send_message(
+                "Informe um ID valido. Exemplo: `123456789012345678`.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            ban_entry = await guild.fetch_ban(discord.Object(id=user_id))
+        except discord.NotFound:
+            await interaction.response.send_message(
+                "Esse usuario nao esta banido neste servidor.",
+                ephemeral=True,
+            )
+            return
+
+        audit_reason = self._build_reason(interaction.user, reason)
+        await guild.unban(ban_entry.user, reason=audit_reason)
+        await interaction.response.send_message(
+            f"{ban_entry.user} (`{ban_entry.user.id}`) foi desbanido.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="timeout", description="Aplica timeout em um membro.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(moderate_members=True)
+    @app_commands.checks.has_permissions(moderate_members=True)
+    @app_commands.checks.bot_has_permissions(moderate_members=True)
+    @app_commands.describe(
+        member="Membro que recebera timeout.",
+        duration="Duracao no formato 30m, 2h, 1d ou 45s.",
+        reason="Motivo do timeout.",
+    )
+    async def timeout(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        duration: str,
+        reason: str | None = None,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                "Este comando so funciona em servidor.",
+                ephemeral=True,
+            )
+            return
+
+        allowed, message = self._can_moderate(guild, interaction.user, member)
+        if not allowed:
+            await interaction.response.send_message(message or "Acao negada.", ephemeral=True)
+            return
+
+        if member.guild_permissions.administrator:
+            await interaction.response.send_message(
+                "Nao e possivel aplicar timeout em administradores.",
+                ephemeral=True,
+            )
+            return
+
+        timeout_duration = self._parse_duration(duration)
+        if timeout_duration is None:
+            await interaction.response.send_message(
+                "Duracao invalida. Use formatos como `30m`, `2h`, `1d` ou `45s`.",
+                ephemeral=True,
+            )
+            return
+
+        max_timeout = timedelta(days=28)
+        if timeout_duration > max_timeout:
+            await interaction.response.send_message(
+                "A duracao maxima de timeout no Discord e de 28 dias.",
+                ephemeral=True,
+            )
+            return
+
+        timed_out_until = discord.utils.utcnow() + timeout_duration
+        audit_reason = self._build_reason(interaction.user, reason)
+        await member.edit(timed_out_until=timed_out_until, reason=audit_reason)
+        await interaction.response.send_message(
+            f"{member.mention} ficou em timeout ate <t:{int(timed_out_until.timestamp())}:F>.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="untimeout", description="Remove o timeout de um membro.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(moderate_members=True)
+    @app_commands.checks.has_permissions(moderate_members=True)
+    @app_commands.checks.bot_has_permissions(moderate_members=True)
+    @app_commands.describe(member="Membro para remover o timeout.", reason="Motivo da remocao.")
+    async def untimeout(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        reason: str | None = None,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                "Este comando so funciona em servidor.",
+                ephemeral=True,
+            )
+            return
+
+        allowed, message = self._can_moderate(guild, interaction.user, member)
+        if not allowed:
+            await interaction.response.send_message(message or "Acao negada.", ephemeral=True)
+            return
+
+        now = discord.utils.utcnow()
+        if member.timed_out_until is None or member.timed_out_until <= now:
+            await interaction.response.send_message(
+                "Esse membro nao esta em timeout.",
+                ephemeral=True,
+            )
+            return
+
+        audit_reason = self._build_reason(interaction.user, reason)
+        await member.edit(timed_out_until=None, reason=audit_reason)
+        await interaction.response.send_message(
+            f"Timeout removido de {member.mention}.",
             ephemeral=True,
         )
 
