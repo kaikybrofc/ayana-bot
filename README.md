@@ -33,7 +33,6 @@ Bot Discord em Python com comandos *slash* organizados em **cogs**, moderação 
   - `/setwarnpolicy ...`
   - `/setautomod ...`
   - `/addroleall <cargo> [include_bots]`
-  - `/dmtodos <mensagem> [dry_run] [include_bots]`
   - `/restaurar` (somente dono do sistema)
 - Sistema de boas-vindas configurável:
   - `/welcomesettings`
