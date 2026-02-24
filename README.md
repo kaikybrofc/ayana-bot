@@ -13,6 +13,7 @@ Bot Discord em Python com comandos *slash* organizados em **cogs**, moderação 
   - `/clear <quantidade>`
   - `/kick <membro> [motivo]`
   - `/ban <membro> [motivo]`
+  - `/restaurar` (somente dono do sistema)
 - Logs no terminal e em arquivo (`logs/bot.log`)
 - Tratamento global de erros para comandos *slash*
 
@@ -39,11 +40,13 @@ cp .env.example .env
 ```env
 DISCORD_TOKEN=seu_token_do_bot
 GUILD_ID=123456789012345678
+DONO_ID=123456789012345678
 ```
 
 Observações:
 - `DISCORD_TOKEN`: token da aba **Bot** no Discord Developer Portal.
 - `GUILD_ID`: ID do servidor para sincronização rápida dos comandos (opcional, mas recomendado).
+- `DONO_ID`: seu ID de usuário no Discord (opcional, usado como `owner_id` do bot).
 
 ## Execução
 ```bash
@@ -67,6 +70,7 @@ ayana-bot/
 Para os comandos de moderação funcionarem corretamente, conceda ao bot:
 - Manage Messages
 - Read Message History
+- Manage Channels
 - Kick Members
 - Ban Members
 

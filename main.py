@@ -27,7 +27,7 @@ def looks_like_discord_token(value: str) -> bool:
     return value.count(".") == 2 and len(value) >= 50
 
 
-def parse_guild_id(raw_value: str | None) -> int | None:
+def parse_discord_id(raw_value: str | None) -> int | None:
     if not raw_value:
         return None
 
@@ -39,20 +39,24 @@ def parse_guild_id(raw_value: str | None) -> int | None:
     candidate = matches[0] if matches else cleaned
 
     try:
-        guild_id = int(candidate)
-        if not (17 <= len(str(guild_id)) <= 20):
+        discord_id = int(candidate)
+        if not (17 <= len(str(discord_id)) <= 20):
             raise ValueError
-        return guild_id
+        return discord_id
     except ValueError:
-        LOGGER.warning("GUILD_ID invalido. Sync sera global.")
         return None
 
 
 async def send_ephemeral(interaction: discord.Interaction, message: str) -> None:
-    if interaction.response.is_done():
-        await interaction.followup.send(message, ephemeral=True)
-    else:
-        await interaction.response.send_message(message, ephemeral=True)
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        LOGGER.warning(
+            "Nao foi possivel responder a interacao (expirada, sem permissao ou canal removido)."
+        )
 
 
 def setup_logging() -> None:
@@ -87,12 +91,13 @@ def setup_logging() -> None:
 
 
 class AyanaBot(commands.Bot):
-    def __init__(self, guild_id: int | None) -> None:
+    def __init__(self, guild_id: int | None, owner_id: int | None) -> None:
         intents = discord.Intents.default()
         super().__init__(
             command_prefix=commands.when_mentioned,
             intents=intents,
             help_command=None,
+            owner_id=owner_id,
         )
         self.sync_guild_id = guild_id
         self.tree.on_error = self.on_app_command_error
@@ -184,7 +189,8 @@ def main() -> None:
     setup_logging()
 
     token = sanitize_token(os.getenv("DISCORD_TOKEN"))
-    guild_id = parse_guild_id(os.getenv("GUILD_ID"))
+    guild_id = parse_discord_id(os.getenv("GUILD_ID"))
+    owner_id = parse_discord_id(os.getenv("DONO_ID"))
 
     if not token:
         raise RuntimeError("A variavel DISCORD_TOKEN nao foi encontrada no .env.")
@@ -192,8 +198,12 @@ def main() -> None:
         raise RuntimeError(
             "DISCORD_TOKEN parece invalido. Use o token do Bot em Developer Portal > Bot > Reset Token."
         )
+    if os.getenv("GUILD_ID") and guild_id is None:
+        LOGGER.warning("GUILD_ID invalido. Sync sera global.")
+    if os.getenv("DONO_ID") and owner_id is None:
+        LOGGER.warning("DONO_ID invalido. owner_id nao sera definido.")
 
-    bot = AyanaBot(guild_id=guild_id)
+    bot = AyanaBot(guild_id=guild_id, owner_id=owner_id)
     bot.run(token, log_handler=None)
 
 

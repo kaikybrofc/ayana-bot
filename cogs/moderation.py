@@ -1,6 +1,10 @@
+import logging
+
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+LOGGER = logging.getLogger("ayana.cogs.moderation")
 
 
 class ModerationCog(commands.Cog):
@@ -126,6 +130,93 @@ class ModerationCog(commands.Cog):
             f"{member.mention} foi banido.",
             ephemeral=True,
         )
+
+    @app_commands.command(
+        name="restaurar",
+        description="Clona e recria o canal atual para limpar todas as mensagens.",
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_channels=True)
+    @app_commands.checks.bot_has_permissions(manage_channels=True, view_channel=True)
+    async def restaurar(self, interaction: discord.Interaction) -> None:
+        if not await self.bot.is_owner(interaction.user):
+            await interaction.response.send_message(
+                "Apenas o dono do sistema pode usar este comando.",
+                ephemeral=True,
+            )
+            return
+
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                "Nao consegui validar suas permissoes neste servidor.",
+                ephemeral=True,
+            )
+            return
+
+        if not interaction.user.guild_permissions.manage_channels:
+            await interaction.response.send_message(
+                "Voce precisa da permissao Gerenciar Canais.",
+                ephemeral=True,
+            )
+            return
+
+        channel = interaction.channel
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message(
+                "Use este comando em um canal de texto do servidor.",
+                ephemeral=True,
+            )
+            return
+
+        channel_name = channel.name
+        channel_type = str(channel.type)
+        reason = f"Restauracao de canal por {interaction.user} ({interaction.user.id})"
+
+        await interaction.response.send_message(
+            "Restaurando este canal. Vou recriar e limpar tudo.",
+            ephemeral=True,
+        )
+
+        try:
+            new_channel = await channel.clone(reason=reason)
+            await new_channel.edit(position=channel.position, reason=reason)
+            await channel.delete(reason=reason)
+        except discord.Forbidden:
+            try:
+                await interaction.followup.send(
+                    "Nao tenho permissao suficiente para restaurar este canal.",
+                    ephemeral=True,
+                )
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                LOGGER.warning("Falha ao enviar retorno de erro do /restaurar (Forbidden).")
+            return
+        except discord.HTTPException:
+            try:
+                await interaction.followup.send(
+                    "Falha ao restaurar o canal. Tente novamente.",
+                    ephemeral=True,
+                )
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                LOGGER.warning("Falha ao enviar retorno de erro do /restaurar (HTTPException).")
+            return
+
+        LOGGER.info(
+            "Canal restaurado: guild=%s canal=%s tipo=%s por=%s",
+            interaction.guild_id,
+            channel_name,
+            channel_type,
+            interaction.user.id,
+        )
+
+        try:
+            await new_channel.send(
+                (
+                    f"Canal restaurado por {interaction.user.mention}.\n"
+                    f"Nome: `{channel_name}` | Tipo: `{channel_type}`"
+                ),
+            )
+        except discord.HTTPException:
+            LOGGER.warning("Canal restaurado, mas nao foi possivel enviar aviso no novo canal.")
 
 
 async def setup(bot: commands.Bot) -> None:
