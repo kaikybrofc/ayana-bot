@@ -19,48 +19,15 @@ MAIN_CATEGORIES = (
     "catgirl",
     "foxgirl",
     "wolfgirl",
-    "femboy",
-    "kemonomimi",
-    "swimsuit",
-    "uncensored",
     "maid",
-    "marin-kitagawa",
-    "mori-calliope",
-    "raiden-shogun",
-    "oppai",
-    "selfies",
-    "uniforms",
-    "ass",
-    "hentai",
-    "milf",
-    "oral",
-    "paizuri",
-    "ecchi",
-    "ero",
     "feet",
-    "yuri",
-    "monster-girl",
-    "pussy",
-    "ass-grab",
-    "threesome",
-    "tentacles",
-    "boobs",
-    "neko",
-    "kitsune",
-    "lingerie",
-    "panties",
-    "cum",
-    "school",
-    "hyprshot",
-    "hyprint",
-    "holo",
-    "gamecg",
     "coffee",
     "food",
-    "arts",
     "random",
-    "nothing",
 )
+
+NO_RESULTS_MESSAGE_PREFIX = "No images matching the specified criteria were found."
+BLACKLIST_MESSAGE_PREFIX = "That tag is on the blacklist."
 
 
 class NekosiaRequestError(RuntimeError):
@@ -75,6 +42,12 @@ def _clean_csv(value: str | None) -> str | None:
         return None
     deduplicated = list(dict.fromkeys(parts))
     return ",".join(deduplicated)
+
+
+def _split_csv(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def _read_list_of_strings(payload: dict[str, Any], key: str) -> list[str]:
@@ -122,6 +95,13 @@ def _resolve_image_url(image_payload: dict[str, Any]) -> str | None:
         if isinstance(url, str) and url:
             return url
     return None
+
+
+def _is_expected_filter_error(message: str) -> bool:
+    normalized = message.strip()
+    return normalized.startswith(NO_RESULTS_MESSAGE_PREFIX) or normalized.startswith(
+        BLACKLIST_MESSAGE_PREFIX
+    )
 
 
 class NekosiaCog(commands.Cog):
@@ -257,7 +237,7 @@ class NekosiaCog(commands.Cog):
         ]
     )
     @app_commands.describe(
-        category="Categoria principal (ex.: catgirl, maid, random).",
+        category="Categoria principal (ex.: catgirl, maid) ou uma tag (ex.: ero).",
         count="Quantidade de imagens (1 a 5).",
         additional_tags="Tags extras separadas por virgula.",
         blacklisted_tags="Tags para excluir separadas por virgula.",
@@ -297,12 +277,56 @@ class NekosiaCog(commands.Cog):
             query_params["rating"] = rating
 
         endpoint = f"/images/{quote(requested_category, safe='')}"
+        fallback_used = False
         try:
             payload = await self._api_get(endpoint, params=query_params)
         except NekosiaRequestError as exc:
-            LOGGER.warning("Falha na consulta NekoSia em categoria '%s': %s", requested_category, exc)
-            await interaction.followup.send(f"Falha ao consultar NekoSia: {exc}", ephemeral=True)
-            return
+            error_message = str(exc)
+            should_fallback_to_tags = requested_category not in MAIN_CATEGORIES and error_message.startswith(
+                NO_RESULTS_MESSAGE_PREFIX
+            )
+
+            if should_fallback_to_tags:
+                fallback_params = dict(query_params)
+                merged_tags = [requested_category, *_split_csv(normalized_additional)]
+                fallback_params["additionalTags"] = ",".join(dict.fromkeys(merged_tags))
+                fallback_endpoint = "/images/nothing"
+                try:
+                    payload = await self._api_get(fallback_endpoint, params=fallback_params)
+                    fallback_used = True
+                except NekosiaRequestError as fallback_exc:
+                    error_message = str(fallback_exc)
+                    if _is_expected_filter_error(error_message):
+                        LOGGER.info(
+                            "Consulta NekoSia sem resultados (categoria '%s' com fallback em tags): %s",
+                            requested_category,
+                            error_message,
+                        )
+                    else:
+                        LOGGER.warning(
+                            "Falha na consulta NekoSia em categoria '%s' com fallback em tags: %s",
+                            requested_category,
+                            error_message,
+                        )
+                    await interaction.followup.send(
+                        f"Falha ao consultar NekoSia: {error_message}",
+                        ephemeral=True,
+                    )
+                    return
+            else:
+                if _is_expected_filter_error(error_message):
+                    LOGGER.info(
+                        "Consulta NekoSia sem resultados (categoria '%s'): %s",
+                        requested_category,
+                        error_message,
+                    )
+                else:
+                    LOGGER.warning("Falha na consulta NekoSia em categoria '%s': %s", requested_category, error_message)
+                await interaction.followup.send(
+                    f"Falha ao consultar NekoSia: {error_message}",
+                    ephemeral=True,
+                )
+                return
 
         images = self._extract_images(payload)
         if not images:
@@ -316,6 +340,11 @@ class NekosiaCog(commands.Cog):
             self._build_image_embed(image, index + 1, len(images))
             for index, image in enumerate(images[:MAX_IMAGES_PER_REQUEST])
         ]
+        if fallback_used:
+            for embed in embeds:
+                embed.set_footer(
+                    text=f"{embed.footer.text} | fallback: category=nothing + additionalTags"
+                )
         await interaction.followup.send(embeds=embeds)
 
     @nekosia.autocomplete("category")
