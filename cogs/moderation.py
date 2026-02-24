@@ -81,9 +81,9 @@ class ModerationCog(commands.Cog):
         target: discord.Member,
     ) -> tuple[bool, str | None]:
         if target == actor:
-            return False, "Voce nao pode usar este comando em voce mesmo."
+            return False, "Voce não pode usar este comando em você mesmo."
         if target == guild.owner:
-            return False, "Voce nao pode moderar o dono do servidor."
+            return False, "Voce não pode moderar o dono do servidor."
         if actor != guild.owner and target.top_role >= actor.top_role:
             return False, "Esse membro tem cargo igual ou superior ao seu."
 

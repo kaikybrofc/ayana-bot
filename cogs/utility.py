@@ -33,6 +33,27 @@ COMMAND_DETAILS: dict[str, dict[str, str]] = {
         "escopo": "Apenas servidor",
         "detalhes": "Mostra ID, dono, membros, canais, cargos e data de criacao do servidor.",
     },
+    "nekosia": {
+        "categoria": "Imagens",
+        "uso": "/nekosia [category] [count] [additional_tags] [blacklisted_tags] [rating]",
+        "permissoes": "Nenhuma",
+        "escopo": "Servidor e DM",
+        "detalhes": "Busca imagens da API NekoSia por categoria com filtros opcionais.",
+    },
+    "nekosia_id": {
+        "categoria": "Imagens",
+        "uso": "/nekosia_id <image_id>",
+        "permissoes": "Nenhuma",
+        "escopo": "Servidor e DM",
+        "detalhes": "Busca uma imagem especifica da API NekoSia pelo ID.",
+    },
+    "nekosia_tags": {
+        "categoria": "Imagens",
+        "uso": "/nekosia_tags [tipo] [termo]",
+        "permissoes": "Nenhuma",
+        "escopo": "Servidor e DM",
+        "detalhes": "Lista tags, animes ou personagens disponiveis na API NekoSia.",
+    },
     "clear": {
         "categoria": "Moderacao",
         "uso": "/clear <amount>",
@@ -147,7 +168,7 @@ COMMAND_DETAILS: dict[str, dict[str, str]] = {
     },
 }
 
-CATEGORY_ORDER = ("Utilitarios", "Moderacao", "Outros")
+CATEGORY_ORDER = ("Utilitarios", "Imagens", "Moderacao", "Outros")
 
 
 def ts(dt: datetime | None) -> str:

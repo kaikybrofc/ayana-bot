@@ -9,6 +9,10 @@ Bot Discord em Python com comandos *slash* organizados em **cogs**, moderação 
   - `/ping`
   - `/userinfo [membro]`
   - `/serverinfo`
+- Comandos de imagens (NekoSia):
+  - `/nekosia [category] [count] [additional_tags] [blacklisted_tags] [rating]`
+  - `/nekosia_id <image_id>`
+  - `/nekosia_tags [tipo] [termo]`
 - Comandos de moderação:
   - `/clear <quantidade>`
   - `/kick <membro> [motivo]`
@@ -89,6 +93,7 @@ python main.py
 ayana-bot/
 ├── cogs/
 │   ├── moderation.py
+│   ├── nekosia.py
 │   └── utility.py
 ├── warn_store.py
 ├── .env.example
