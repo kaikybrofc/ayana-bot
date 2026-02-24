@@ -198,6 +198,32 @@ class UtilityCog(commands.Cog):
             return details["categoria"]
         return "Outros"
 
+    @staticmethod
+    def _split_field_values(entries: list[str], max_length: int = 1024) -> list[str]:
+        chunks: list[str] = []
+        current_chunk: list[str] = []
+        current_length = 0
+
+        for entry in entries:
+            safe_entry = entry
+            if len(safe_entry) > max_length:
+                safe_entry = f"{safe_entry[: max_length - 3]}..."
+
+            extra_length = len(safe_entry) + (2 if current_chunk else 0)
+            if current_chunk and current_length + extra_length > max_length:
+                chunks.append("\n\n".join(current_chunk))
+                current_chunk = [safe_entry]
+                current_length = len(safe_entry)
+                continue
+
+            current_chunk.append(safe_entry)
+            current_length += extra_length
+
+        if current_chunk:
+            chunks.append("\n\n".join(current_chunk))
+
+        return chunks
+
     @app_commands.command(name="ping", description="Mostra a latencia atual do bot.")
     async def ping(self, interaction: discord.Interaction) -> None:
         latency_ms = round(self.bot.latency * 1000)
@@ -272,16 +298,30 @@ class UtilityCog(commands.Cog):
             color=discord.Color.blurple(),
         )
 
+        max_fields = 25
+        used_fields = 0
+        field_limit_reached = False
+
         for category in CATEGORY_ORDER:
             entries = commands_by_category.get(category, [])
             if entries:
-                embed.add_field(
-                    name=category,
-                    value="\n\n".join(entries),
-                    inline=False,
-                )
+                chunks = self._split_field_values(entries)
+                for index, chunk in enumerate(chunks):
+                    if used_fields >= max_fields:
+                        field_limit_reached = True
+                        break
 
-        embed.set_footer(text=f"Total de comandos: {len(slash_commands)}")
+                    field_name = category if index == 0 else f"{category} (cont.)"
+                    embed.add_field(name=field_name, value=chunk, inline=False)
+                    used_fields += 1
+
+            if field_limit_reached:
+                break
+
+        footer_text = f"Total de comandos: {len(slash_commands)}"
+        if field_limit_reached:
+            footer_text += " | Alguns itens foram omitidos por limite de embed."
+        embed.set_footer(text=footer_text)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @help.autocomplete("comando")
