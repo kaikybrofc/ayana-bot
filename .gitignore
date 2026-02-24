@@ -1,0 +1,21 @@
+# Ambiente local
+.env
+.venv/
+
+# Python cache/build
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+build/
+dist/
+
+# Logs
+logs/
+
+# Ferramentas/IDE
+.vscode/
+.idea/
+.DS_Store
