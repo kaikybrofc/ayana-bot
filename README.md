@@ -13,16 +13,21 @@ Bot Discord em Python com comandos *slash* organizados em **cogs**, moderação 
   - `/clear <quantidade>`
   - `/kick <membro> [motivo]`
   - `/ban <membro> [motivo]`
-  - `/unban <user_id> [motivo]`
+  - `/unban <usuario_banido_ou_id> [motivo]`
   - `/timeout <membro> <duracao> [motivo]` (ex.: `30m`, `2h`, `1d`)
   - `/untimeout <membro> [motivo]`
+  - `/warn <membro> <motivo>`
+  - `/warnings <membro>`
+  - `/clearwarnings <membro>`
   - `/restaurar` (somente dono do sistema)
+- Sistema de avisos persistente em MySQL
 - Logs no terminal e em arquivo (`logs/bot.log`)
 - Tratamento global de erros para comandos *slash*
 
 ## Requisitos
 - Python 3.10+
 - Conta e aplicação no Discord Developer Portal
+- MySQL 8+ (ou compatível)
 
 ## Configuração
 1. Crie e ative seu ambiente virtual.
@@ -44,12 +49,23 @@ cp .env.example .env
 DISCORD_TOKEN=seu_token_do_bot
 GUILD_ID=123456789012345678
 DONO_ID=123456789012345678
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=seu_usuario_mysql
+DB_PASSWORD=sua_senha_mysql
+DB_NAME=ayana
+DB_POOL_LIMIT=10
 ```
 
 Observações:
 - `DISCORD_TOKEN`: token da aba **Bot** no Discord Developer Portal.
 - `GUILD_ID`: ID do servidor para sincronização rápida dos comandos (opcional, mas recomendado).
 - `DONO_ID`: seu ID de usuário no Discord (opcional, usado como `owner_id` do bot).
+- `DB_HOST`/`DB_PORT`: host e porta do MySQL.
+- `DB_USER`/`DB_PASSWORD`: credenciais do usuário MySQL.
+- `DB_NAME`: nome do banco que sera usado pelo bot.
+- `DB_POOL_LIMIT`: limite maximo de conexoes no pool.
+- Se o banco informado em `DB_NAME` nao existir, o bot cria automaticamente na inicializacao.
 
 ## Execução
 ```bash
@@ -62,6 +78,7 @@ ayana-bot/
 ├── cogs/
 │   ├── moderation.py
 │   └── utility.py
+├── warn_store.py
 ├── .env.example
 ├── .gitignore
 ├── main.py

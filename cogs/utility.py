@@ -56,10 +56,10 @@ COMMAND_DETAILS: dict[str, dict[str, str]] = {
     },
     "unban": {
         "categoria": "Moderacao",
-        "uso": "/unban <user_id> [reason]",
+        "uso": "/unban <usuario_banido_ou_id> [reason]",
         "permissoes": "Ban Members",
         "escopo": "Apenas servidor",
-        "detalhes": "Remove o banimento de um usuario pelo ID.",
+        "detalhes": "Remove o banimento via autocomplete de banidos ou por ID.",
     },
     "timeout": {
         "categoria": "Moderacao",
@@ -74,6 +74,27 @@ COMMAND_DETAILS: dict[str, dict[str, str]] = {
         "permissoes": "Moderate Members",
         "escopo": "Apenas servidor",
         "detalhes": "Remove o timeout ativo de um membro.",
+    },
+    "warn": {
+        "categoria": "Moderacao",
+        "uso": "/warn <member> <reason>",
+        "permissoes": "Moderate Members",
+        "escopo": "Apenas servidor",
+        "detalhes": "Registra um aviso no historico do membro (MySQL).",
+    },
+    "warnings": {
+        "categoria": "Moderacao",
+        "uso": "/warnings <member>",
+        "permissoes": "Moderate Members",
+        "escopo": "Apenas servidor",
+        "detalhes": "Mostra os avisos ja aplicados ao membro.",
+    },
+    "clearwarnings": {
+        "categoria": "Moderacao",
+        "uso": "/clearwarnings <member>",
+        "permissoes": "Moderate Members",
+        "escopo": "Apenas servidor",
+        "detalhes": "Remove todos os avisos registrados de um membro.",
     },
     "restaurar": {
         "categoria": "Moderacao",

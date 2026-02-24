@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import discord
 from discord import app_commands
@@ -49,6 +49,18 @@ class ModerationCog(commands.Cog):
             "d": 60 * 60 * 24,
         }
         return timedelta(seconds=amount * multipliers[unit])
+
+    @staticmethod
+    def _choice_label(text: str, max_length: int = 100) -> str:
+        if len(text) <= max_length:
+            return text
+        return text[: max_length - 3] + "..."
+
+    def _warn_store(self):
+        warn_store = getattr(self.bot, "warn_store", None)
+        if warn_store is None:
+            raise RuntimeError("WarnStore nao inicializado.")
+        return warn_store
 
     @staticmethod
     def _can_moderate(
@@ -165,13 +177,13 @@ class ModerationCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="unban", description="Remove o banimento de um usuario pelo ID.")
+    @app_commands.command(name="unban", description="Remove o banimento de um usuario.")
     @app_commands.guild_only()
     @app_commands.default_permissions(ban_members=True)
     @app_commands.checks.has_permissions(ban_members=True)
     @app_commands.checks.bot_has_permissions(ban_members=True)
     @app_commands.describe(
-        user="ID ou mencao do usuario para desbanir.",
+        user="Usuario banido (autocomplete) ou ID para desbanir.",
         reason="Motivo do desbanimento.",
     )
     async def unban(
@@ -211,6 +223,54 @@ class ModerationCog(commands.Cog):
             f"{ban_entry.user} (`{ban_entry.user.id}`) foi desbanido.",
             ephemeral=True,
         )
+
+    @unban.autocomplete("user")
+    async def unban_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        guild = interaction.guild
+        if guild is None:
+            return []
+
+        if not isinstance(interaction.user, discord.Member):
+            return []
+
+        if not interaction.user.guild_permissions.ban_members:
+            return []
+
+        current_text = current.strip().lower()
+        choices: list[app_commands.Choice[str]] = []
+
+        typed_id = self._parse_discord_id(current)
+        if typed_id is not None:
+            choices.append(
+                app_commands.Choice(
+                    name=self._choice_label(f"Usar ID digitado ({typed_id})"),
+                    value=str(typed_id),
+                ),
+            )
+
+        try:
+            async for entry in guild.bans(limit=500):
+                user = entry.user
+                searchable = f"{user} {user.id} {user.name}".lower()
+                if current_text and current_text not in searchable:
+                    continue
+
+                value = str(user.id)
+                if any(choice.value == value for choice in choices):
+                    continue
+
+                label = self._choice_label(f"{user} ({user.id})")
+                choices.append(app_commands.Choice(name=label, value=value))
+                if len(choices) >= 25:
+                    break
+        except (discord.Forbidden, discord.HTTPException):
+            return choices[:25]
+
+        return choices[:25]
 
     @app_commands.command(name="timeout", description="Aplica timeout em um membro.")
     @app_commands.guild_only()
@@ -310,6 +370,184 @@ class ModerationCog(commands.Cog):
         await member.edit(timed_out_until=None, reason=audit_reason)
         await interaction.response.send_message(
             f"Timeout removido de {member.mention}.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="warn", description="Registra um aviso para um membro.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(moderate_members=True)
+    @app_commands.checks.has_permissions(moderate_members=True)
+    @app_commands.describe(member="Membro que recebera o aviso.", reason="Motivo do aviso.")
+    async def warn(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        reason: str,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                "Este comando so funciona em servidor.",
+                ephemeral=True,
+            )
+            return
+
+        allowed, message = self._can_moderate(guild, interaction.user, member)
+        if not allowed:
+            await interaction.response.send_message(message or "Acao negada.", ephemeral=True)
+            return
+
+        sanitized_reason = reason.strip()
+        if not sanitized_reason:
+            await interaction.response.send_message(
+                "Informe um motivo para o aviso.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            warning_id, total = await self._warn_store().add_warning(
+                guild_id=guild.id,
+                user_id=member.id,
+                moderator_id=interaction.user.id,
+                reason=sanitized_reason,
+            )
+        except Exception as exc:
+            LOGGER.error(
+                "Falha ao salvar warn no MySQL.",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            await interaction.response.send_message(
+                "Falha ao salvar o aviso no banco de dados.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            (
+                f"{member.mention} recebeu um aviso.\n"
+                f"ID do aviso: `{warning_id}` | Total de avisos: `{total}`"
+            ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="warnings", description="Lista avisos de um membro.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(moderate_members=True)
+    @app_commands.checks.has_permissions(moderate_members=True)
+    @app_commands.describe(member="Membro para consultar historico de avisos.")
+    async def warnings(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "Este comando so funciona em servidor.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            total, rows = await self._warn_store().get_warnings(
+                guild_id=guild.id,
+                user_id=member.id,
+                limit=10,
+            )
+        except Exception as exc:
+            LOGGER.error(
+                "Falha ao consultar warnings no MySQL.",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            await interaction.response.send_message(
+                "Falha ao consultar avisos no banco de dados.",
+                ephemeral=True,
+            )
+            return
+
+        if total == 0:
+            await interaction.response.send_message(
+                f"{member.mention} nao possui avisos registrados.",
+                ephemeral=True,
+            )
+            return
+
+        entries: list[str] = []
+        for row in rows:
+            warning_id = row.get("id", "?")
+            moderator_id = row.get("moderator_id", "desconhecido")
+            reason = str(row.get("reason", "Sem motivo informado."))
+            created_at = row.get("created_at")
+            timestamp = None
+            if isinstance(created_at, datetime):
+                timestamp = int(created_at.timestamp())
+
+            header = f"**#{warning_id}** por <@{moderator_id}>"
+            if timestamp is not None:
+                header += f" em <t:{timestamp}:f>"
+            entry = f"{header}\nMotivo: {self._choice_label(reason, max_length=220)}"
+            entries.append(entry)
+
+        embed = discord.Embed(
+            title=f"Historico de avisos: {member}",
+            description="\n\n".join(entries),
+            color=discord.Color.orange(),
+        )
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.set_footer(
+            text=f"Total de avisos: {total} | Mostrando os {len(entries)} mais recentes",
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="clearwarnings", description="Remove todos os avisos de um membro.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(moderate_members=True)
+    @app_commands.checks.has_permissions(moderate_members=True)
+    @app_commands.describe(member="Membro que tera o historico limpo.")
+    async def clearwarnings(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                "Este comando so funciona em servidor.",
+                ephemeral=True,
+            )
+            return
+
+        allowed, message = self._can_moderate(guild, interaction.user, member)
+        if not allowed:
+            await interaction.response.send_message(message or "Acao negada.", ephemeral=True)
+            return
+
+        try:
+            removed = await self._warn_store().clear_warnings(
+                guild_id=guild.id,
+                user_id=member.id,
+            )
+        except Exception as exc:
+            LOGGER.error(
+                "Falha ao limpar warnings no MySQL.",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            await interaction.response.send_message(
+                "Falha ao limpar avisos no banco de dados.",
+                ephemeral=True,
+            )
+            return
+
+        if removed == 0:
+            await interaction.response.send_message(
+                f"{member.mention} nao possui avisos para remover.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            f"{removed} avisos removidos de {member.mention}.",
             ephemeral=True,
         )
 
