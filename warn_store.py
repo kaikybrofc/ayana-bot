@@ -24,6 +24,20 @@ DEFAULT_GUILD_SETTINGS = {
     "automod_spam_interval_seconds": 8,
     "automod_mention_limit": 5,
     "automod_bypass_role_ids": [],
+    "welcome_enabled": False,
+    "welcome_channel_id": None,
+    "welcome_message": (
+        "Bem-vindo {user_mention} ao **{guild_name}**! "
+        "Agora somos **{member_count}** membros."
+    ),
+    "welcome_dm_enabled": False,
+    "welcome_dm_message": (
+        "Ola {user_name}, bem-vindo(a) ao {guild_name}! "
+        "Leia as regras e aproveite a comunidade."
+    ),
+    "welcome_auto_role_ids": [],
+    "welcome_mention_user": True,
+    "welcome_delete_after_seconds": 0,
 }
 
 SETTINGS_FIELD_TYPES: dict[str, str] = {
@@ -41,6 +55,14 @@ SETTINGS_FIELD_TYPES: dict[str, str] = {
     "automod_spam_interval_seconds": "int",
     "automod_mention_limit": "int",
     "automod_bypass_role_ids": "role_list",
+    "welcome_enabled": "bool",
+    "welcome_channel_id": "int_or_none",
+    "welcome_message": "str",
+    "welcome_dm_enabled": "bool",
+    "welcome_dm_message": "str",
+    "welcome_auto_role_ids": "role_list",
+    "welcome_mention_user": "bool",
+    "welcome_delete_after_seconds": "int",
 }
 
 
@@ -179,6 +201,14 @@ class WarnStore:
             automod_spam_interval_seconds INT UNSIGNED NOT NULL DEFAULT 8,
             automod_mention_limit INT UNSIGNED NOT NULL DEFAULT 5,
             automod_bypass_role_ids TEXT NULL,
+            welcome_enabled TINYINT(1) NOT NULL DEFAULT 0,
+            welcome_channel_id BIGINT UNSIGNED NULL DEFAULT NULL,
+            welcome_message VARCHAR(1500) NOT NULL DEFAULT 'Bem-vindo {user_mention} ao **{guild_name}**! Agora somos **{member_count}** membros.',
+            welcome_dm_enabled TINYINT(1) NOT NULL DEFAULT 0,
+            welcome_dm_message VARCHAR(1500) NOT NULL DEFAULT 'Ola {user_name}, bem-vindo(a) ao {guild_name}! Leia as regras e aproveite a comunidade.',
+            welcome_auto_role_ids TEXT NULL,
+            welcome_mention_user TINYINT(1) NOT NULL DEFAULT 1,
+            welcome_delete_after_seconds INT UNSIGNED NOT NULL DEFAULT 0,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (guild_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -221,6 +251,7 @@ class WarnStore:
                 await cursor.execute(create_infractions)
                 await cursor.execute(create_user_levels)
                 await self._ensure_warning_expiration_column(cursor)
+                await self._ensure_guild_settings_columns(cursor)
 
     async def _ensure_warning_expiration_column(self, cursor: aiomysql.Cursor) -> None:
         await cursor.execute("SHOW COLUMNS FROM warnings LIKE 'expires_at'")
@@ -230,6 +261,53 @@ class WarnStore:
         await cursor.execute(
             "ALTER TABLE warnings ADD COLUMN expires_at TIMESTAMP NULL DEFAULT NULL AFTER reason"
         )
+
+    async def _ensure_guild_settings_columns(self, cursor: aiomysql.Cursor) -> None:
+        required_columns = {
+            "welcome_enabled": (
+                "ALTER TABLE guild_settings "
+                "ADD COLUMN welcome_enabled TINYINT(1) NOT NULL DEFAULT 0 AFTER automod_bypass_role_ids"
+            ),
+            "welcome_channel_id": (
+                "ALTER TABLE guild_settings "
+                "ADD COLUMN welcome_channel_id BIGINT UNSIGNED NULL DEFAULT NULL AFTER welcome_enabled"
+            ),
+            "welcome_message": (
+                "ALTER TABLE guild_settings "
+                "ADD COLUMN welcome_message VARCHAR(1500) NOT NULL "
+                "DEFAULT 'Bem-vindo {user_mention} ao **{guild_name}**! Agora somos **{member_count}** membros.' "
+                "AFTER welcome_channel_id"
+            ),
+            "welcome_dm_enabled": (
+                "ALTER TABLE guild_settings "
+                "ADD COLUMN welcome_dm_enabled TINYINT(1) NOT NULL DEFAULT 0 AFTER welcome_message"
+            ),
+            "welcome_dm_message": (
+                "ALTER TABLE guild_settings "
+                "ADD COLUMN welcome_dm_message VARCHAR(1500) NOT NULL "
+                "DEFAULT 'Ola {user_name}, bem-vindo(a) ao {guild_name}! Leia as regras e aproveite a comunidade.' "
+                "AFTER welcome_dm_enabled"
+            ),
+            "welcome_auto_role_ids": (
+                "ALTER TABLE guild_settings "
+                "ADD COLUMN welcome_auto_role_ids TEXT NULL AFTER welcome_dm_message"
+            ),
+            "welcome_mention_user": (
+                "ALTER TABLE guild_settings "
+                "ADD COLUMN welcome_mention_user TINYINT(1) NOT NULL DEFAULT 1 AFTER welcome_auto_role_ids"
+            ),
+            "welcome_delete_after_seconds": (
+                "ALTER TABLE guild_settings "
+                "ADD COLUMN welcome_delete_after_seconds INT UNSIGNED NOT NULL DEFAULT 0 AFTER welcome_mention_user"
+            ),
+        }
+
+        for column_name, alter_sql in required_columns.items():
+            await cursor.execute(f"SHOW COLUMNS FROM guild_settings LIKE '{column_name}'")
+            row = await cursor.fetchone()
+            if row is not None:
+                continue
+            await cursor.execute(alter_sql)
 
     @property
     def pool(self) -> aiomysql.Pool:
@@ -257,9 +335,17 @@ class WarnStore:
                         automod_spam_max_messages,
                         automod_spam_interval_seconds,
                         automod_mention_limit,
-                        automod_bypass_role_ids
+                        automod_bypass_role_ids,
+                        welcome_enabled,
+                        welcome_channel_id,
+                        welcome_message,
+                        welcome_dm_enabled,
+                        welcome_dm_message,
+                        welcome_auto_role_ids,
+                        welcome_mention_user,
+                        welcome_delete_after_seconds
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE guild_id = guild_id
                     """,
                     (
@@ -278,6 +364,14 @@ class WarnStore:
                         DEFAULT_GUILD_SETTINGS["automod_spam_interval_seconds"],
                         DEFAULT_GUILD_SETTINGS["automod_mention_limit"],
                         _serialize_role_ids(DEFAULT_GUILD_SETTINGS["automod_bypass_role_ids"]),
+                        int(DEFAULT_GUILD_SETTINGS["welcome_enabled"]),
+                        DEFAULT_GUILD_SETTINGS["welcome_channel_id"],
+                        DEFAULT_GUILD_SETTINGS["welcome_message"],
+                        int(DEFAULT_GUILD_SETTINGS["welcome_dm_enabled"]),
+                        DEFAULT_GUILD_SETTINGS["welcome_dm_message"],
+                        _serialize_role_ids(DEFAULT_GUILD_SETTINGS["welcome_auto_role_ids"]),
+                        int(DEFAULT_GUILD_SETTINGS["welcome_mention_user"]),
+                        DEFAULT_GUILD_SETTINGS["welcome_delete_after_seconds"],
                     ),
                 )
 
@@ -302,7 +396,15 @@ class WarnStore:
                         automod_spam_max_messages,
                         automod_spam_interval_seconds,
                         automod_mention_limit,
-                        automod_bypass_role_ids
+                        automod_bypass_role_ids,
+                        welcome_enabled,
+                        welcome_channel_id,
+                        welcome_message,
+                        welcome_dm_enabled,
+                        welcome_dm_message,
+                        welcome_auto_role_ids,
+                        welcome_mention_user,
+                        welcome_delete_after_seconds
                     FROM guild_settings
                     WHERE guild_id = %s
                     LIMIT 1
@@ -660,6 +762,20 @@ class WarnStore:
             "automod_spam_interval_seconds": int(row["automod_spam_interval_seconds"]),
             "automod_mention_limit": int(row["automod_mention_limit"]),
             "automod_bypass_role_ids": _parse_role_ids(row.get("automod_bypass_role_ids")),
+            "welcome_enabled": bool(row.get("welcome_enabled", False)),
+            "welcome_channel_id": (
+                int(row["welcome_channel_id"]) if row.get("welcome_channel_id") else None
+            ),
+            "welcome_message": str(
+                row.get("welcome_message") or DEFAULT_GUILD_SETTINGS["welcome_message"]
+            )[:1500],
+            "welcome_dm_enabled": bool(row.get("welcome_dm_enabled", False)),
+            "welcome_dm_message": str(
+                row.get("welcome_dm_message") or DEFAULT_GUILD_SETTINGS["welcome_dm_message"]
+            )[:1500],
+            "welcome_auto_role_ids": _parse_role_ids(row.get("welcome_auto_role_ids")),
+            "welcome_mention_user": bool(row.get("welcome_mention_user", True)),
+            "welcome_delete_after_seconds": int(row.get("welcome_delete_after_seconds") or 0),
         }
 
     @staticmethod
@@ -672,6 +788,10 @@ class WarnStore:
             if value is None:
                 return None
             return int(value)
+        if field_type == "str":
+            if value is None:
+                return ""
+            return str(value)[:1500]
         if field_type == "role_list":
             if value is None:
                 return ""
@@ -679,5 +799,5 @@ class WarnStore:
                 return _serialize_role_ids(_parse_role_ids(value))
             if isinstance(value, (list, tuple, set)):
                 return _serialize_role_ids([int(item) for item in value])
-            raise ValueError("Valor invalido para automod_bypass_role_ids.")
+            raise ValueError("Valor invalido para lista de cargos.")
         return value

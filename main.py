@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from warn_store import MySQLConfig, WarnStore
 
 LOGGER = logging.getLogger("ayana")
-EXTENSIONS = ("cogs.utility", "cogs.leveling", "cogs.moderation", "cogs.nekosia")
+EXTENSIONS = ("cogs.utility", "cogs.leveling", "cogs.moderation", "cogs.welcome", "cogs.nekosia")
 
 
 def sanitize_env_value(raw_value: str | None) -> str | None:
@@ -156,6 +156,7 @@ class AyanaBot(commands.Bot):
         warn_store: WarnStore,
     ) -> None:
         intents = discord.Intents.default()
+        intents.members = True
         intents.message_content = True
         super().__init__(
             command_prefix=commands.when_mentioned,

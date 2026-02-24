@@ -105,6 +105,47 @@ class ModerationCog(commands.Cog):
         return target.top_role < me.top_role
 
     @staticmethod
+    def _can_manage_role(
+        guild: discord.Guild,
+        actor: discord.Member,
+        role: discord.Role,
+    ) -> tuple[bool, str | None]:
+        if role.is_default():
+            return False, "Nao use @everyone para esta acao."
+        if role.managed:
+            return False, "Esse cargo e gerenciado por integracao e nao pode ser atribuido manualmente."
+
+        if actor != guild.owner and role >= actor.top_role:
+            return False, "Esse cargo tem posicao igual ou superior ao seu maior cargo."
+
+        me = guild.me
+        if me is None:
+            return False, "Nao consegui validar minha hierarquia de cargos."
+        if role >= me.top_role:
+            return False, "Esse cargo tem posicao igual ou superior ao meu maior cargo."
+        return True, None
+
+    async def _collect_members_for_bulk(self, guild: discord.Guild) -> tuple[list[discord.Member], bool]:
+        members_by_id: dict[int, discord.Member] = {}
+        used_api_listing = False
+        if self.bot.intents.members:
+            try:
+                async for member in guild.fetch_members(limit=None):
+                    members_by_id[member.id] = member
+                used_api_listing = True
+            except (discord.Forbidden, discord.HTTPException):
+                LOGGER.warning(
+                    "Falha ao listar membros via API para bulk role. guild=%s",
+                    guild.id,
+                )
+
+        if not members_by_id:
+            for member in guild.members:
+                members_by_id[member.id] = member
+
+        return list(members_by_id.values()), used_api_listing
+
+    @staticmethod
     def _is_automod_bypass(member: discord.Member, settings: dict[str, Any]) -> bool:
         if member.guild_permissions.administrator or member.guild_permissions.manage_guild:
             return True
@@ -1468,6 +1509,238 @@ class ModerationCog(commands.Cog):
                 f"Anti-mention flood: `{self._bool_status(settings['automod_anti_mention_flood'])}` "
                 f"(limite {settings['automod_mention_limit']})\n"
                 f"Bypass roles: {bypass_display}"
+            ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="addroleall",
+        description="Adiciona um cargo em massa para os membros do servidor.",
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_roles=True)
+    @app_commands.checks.has_permissions(manage_roles=True)
+    @app_commands.checks.bot_has_permissions(manage_roles=True)
+    @app_commands.describe(
+        role="Cargo para adicionar a todos os membros elegiveis.",
+        include_bots="Se true, inclui contas de bot tambem.",
+    )
+    async def addroleall(
+        self,
+        interaction: discord.Interaction,
+        role: discord.Role,
+        include_bots: bool = False,
+    ) -> None:
+        guild = interaction.guild
+        actor = interaction.user
+        if guild is None or not isinstance(actor, discord.Member):
+            await interaction.response.send_message(
+                "Este comando so funciona em servidor.",
+                ephemeral=True,
+            )
+            return
+
+        can_manage, reason = self._can_manage_role(guild, actor, role)
+        if not can_manage:
+            await interaction.response.send_message(reason or "Nao foi possivel usar esse cargo.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        members, used_api_listing = await self._collect_members_for_bulk(guild)
+        if not members:
+            await interaction.followup.send(
+                "Nao consegui listar membros para processar.",
+                ephemeral=True,
+            )
+            return
+
+        audit_reason = self._build_reason(actor, f"Adicao em massa do cargo {role.name} ({role.id})")
+        total_seen = 0
+        added = 0
+        skipped_bots = 0
+        skipped_has_role = 0
+        skipped_actor_hierarchy = 0
+        skipped_bot_hierarchy = 0
+        failed = 0
+
+        me = guild.me
+        for member in members:
+            total_seen += 1
+            if not include_bots and member.bot:
+                skipped_bots += 1
+                continue
+            if role in member.roles:
+                skipped_has_role += 1
+                continue
+
+            if actor != guild.owner and member.top_role >= actor.top_role:
+                skipped_actor_hierarchy += 1
+                continue
+
+            if me is None or member == guild.owner or member.top_role >= me.top_role:
+                skipped_bot_hierarchy += 1
+                continue
+
+            try:
+                await member.add_roles(role, reason=audit_reason)
+                added += 1
+            except (discord.Forbidden, discord.HTTPException):
+                failed += 1
+
+        source_text = "API completa" if used_api_listing else "cache local"
+        note = ""
+        if not used_api_listing:
+            note = (
+                "\\nObs: usei apenas membros em cache. "
+                "Ative `SERVER MEMBERS INTENT` para garantir cobertura total."
+            )
+
+        await interaction.followup.send(
+            (
+                "Processamento de cargo em massa finalizado.\\n"
+                f"Cargo: {role.mention}\\n"
+                f"Fonte de membros: `{source_text}`\\n"
+                f"Total analisado: `{total_seen}`\\n"
+                f"Adicionados: `{added}`\\n"
+                f"Ja tinham o cargo: `{skipped_has_role}`\\n"
+                f"Ignorados (bots): `{skipped_bots}`\\n"
+                f"Ignorados (hierarquia do autor): `{skipped_actor_hierarchy}`\\n"
+                f"Ignorados (hierarquia do bot): `{skipped_bot_hierarchy}`\\n"
+                f"Falhas de API/permissao: `{failed}`"
+                f"{note}"
+            ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="dmtodos",
+        description="Envia uma mensagem por DM para todos os membros elegiveis.",
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.describe(
+        mensagem="Conteudo da mensagem direta.",
+        dry_run="Se true, apenas mostra quem receberia.",
+        include_bots="Se true, inclui contas de bot tambem.",
+    )
+    async def dmtodos(
+        self,
+        interaction: discord.Interaction,
+        mensagem: str,
+        dry_run: bool = True,
+        include_bots: bool = False,
+    ) -> None:
+        guild = interaction.guild
+        actor = interaction.user
+        if guild is None or not isinstance(actor, discord.Member):
+            await interaction.response.send_message(
+                "Este comando so funciona em servidor.",
+                ephemeral=True,
+            )
+            return
+
+        clean_message = mensagem.strip()
+        if not clean_message:
+            await interaction.response.send_message(
+                "A mensagem nao pode ser vazia.",
+                ephemeral=True,
+            )
+            return
+        if len(clean_message) > 2000:
+            await interaction.response.send_message(
+                "A mensagem excede o limite de 2000 caracteres do Discord.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        members, used_api_listing = await self._collect_members_for_bulk(guild)
+        if not members:
+            await interaction.followup.send(
+                "Nao consegui listar membros para processar.",
+                ephemeral=True,
+            )
+            return
+
+        recipients: list[discord.Member] = []
+        seen = 0
+        skipped_bots = 0
+        for member in members:
+            seen += 1
+            if self.bot.user and member.id == self.bot.user.id:
+                continue
+            if not include_bots and member.bot:
+                skipped_bots += 1
+                continue
+            recipients.append(member)
+
+        source_text = "API completa" if used_api_listing else "cache local"
+        note = ""
+        if not used_api_listing:
+            note = (
+                "\nObs: usei membros em cache local. "
+                "Ative `SERVER MEMBERS INTENT` para cobertura completa."
+            )
+
+        if not recipients:
+            await interaction.followup.send(
+                (
+                    "Nenhum destinatario elegivel para DM em massa.\n"
+                    f"Total analisado: `{seen}` | Ignorados (bots): `{skipped_bots}`"
+                ),
+                ephemeral=True,
+            )
+            return
+
+        preview_lines: list[str] = []
+        for member in recipients[:12]:
+            preview_lines.append(f"- {member.mention} (`{member.id}`)")
+
+        if dry_run:
+            extra = ""
+            if len(recipients) > 12:
+                extra = f"\n... e mais `{len(recipients) - 12}` membro(s)."
+            await interaction.followup.send(
+                (
+                    "Dry-run: nenhuma DM foi enviada.\n"
+                    f"Fonte de membros: `{source_text}`\n"
+                    f"Total analisado: `{seen}`\n"
+                    f"Destinatarios: `{len(recipients)}`\n"
+                    f"Ignorados (bots): `{skipped_bots}`\n"
+                    "Prévia:\n"
+                    + "\n".join(preview_lines)
+                    + extra
+                    + note
+                ),
+                ephemeral=True,
+            )
+            return
+
+        sent = 0
+        blocked_dm = 0
+        failed = 0
+        for member in recipients:
+            try:
+                await member.send(clean_message)
+                sent += 1
+            except discord.Forbidden:
+                blocked_dm += 1
+            except discord.HTTPException:
+                failed += 1
+
+        await interaction.followup.send(
+            (
+                "Envio de DM em massa finalizado.\n"
+                f"Fonte de membros: `{source_text}`\n"
+                f"Total analisado: `{seen}`\n"
+                f"Destinatarios: `{len(recipients)}`\n"
+                f"Enviadas: `{sent}`\n"
+                f"Falha por DM fechada/bloqueada: `{blocked_dm}`\n"
+                f"Falhas de API: `{failed}`"
+                f"{note}"
             ),
             ephemeral=True,
         )

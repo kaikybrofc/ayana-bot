@@ -32,12 +32,18 @@ Bot Discord em Python com comandos *slash* organizados em **cogs**, moderação 
   - `/setautomodlog [canal]`
   - `/setwarnpolicy ...`
   - `/setautomod ...`
+  - `/addroleall <cargo> [include_bots]`
+  - `/dmtodos <mensagem> [dry_run] [include_bots]`
   - `/restaurar` (somente dono do sistema)
+- Sistema de boas-vindas configurável:
+  - `/welcomesettings`
+  - `/setwelcome ...`
+  - `/welcometest [membro]`
 - Sistema de avisos persistente em MySQL
 - Expiração de warns configurável por servidor
 - Escalonamento automático por warns (timeout/ban)
 - AutoMod básico (anti-spam, anti-link, anti-mention flood)
-- Configuração por servidor em `guild_settings` (canais, limites e bypass roles)
+- Configuração por servidor em `guild_settings` (moderacao, automod e welcome)
 - Auditoria unificada em `infractions`
 - Logs no terminal e em arquivo (`logs/bot.log`)
 - Tratamento global de erros para comandos *slash*
@@ -84,7 +90,7 @@ Observações:
 - `DB_NAME`: nome do banco que sera usado pelo bot.
 - `DB_POOL_LIMIT`: limite maximo de conexoes no pool.
 - Se o banco informado em `DB_NAME` nao existir, o bot cria automaticamente na inicializacao.
-- O bot tambem cria/atualiza automaticamente as tabelas `warnings`, `guild_settings` e `infractions`.
+- O bot tambem cria/atualiza automaticamente as tabelas `warnings`, `guild_settings`, `infractions` e `user_levels`.
 
 ## Execução
 ```bash
@@ -98,6 +104,7 @@ ayana-bot/
 │   ├── leveling.py
 │   ├── moderation.py
 │   ├── nekosia.py
+│   ├── welcome.py
 │   └── utility.py
 ├── warn_store.py
 ├── .env.example
@@ -120,6 +127,7 @@ Para os comandos de moderação funcionarem corretamente, conceda ao bot:
 
 ## Intents
 - Ative `MESSAGE CONTENT INTENT` no Discord Developer Portal para o AutoMod funcionar.
+- Ative `SERVER MEMBERS INTENT` para funcionalidades de welcome e cargos em massa funcionarem em todos os membros.
 
 ## Logs e erros
 - Os logs são gravados no console e em `logs/bot.log` (com rotação automática).
