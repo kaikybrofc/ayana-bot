@@ -4,11 +4,14 @@ Bot Discord em Python com comandos *slash* organizados em **cogs**, moderação 
 
 ## Funcionalidades
 - Estrutura modular com cogs
+- Sistema de nivel e XP por mensagens (contabiliza toda mensagem de usuario)
 - Comandos utilitários:
   - `/help` (lista geral) e `/help comando:<nome>` (detalhado)
   - `/ping`
   - `/userinfo [membro]`
   - `/serverinfo`
+  - `/rank [membro]` (card em canvas)
+  - `/leaderboard [limite]` (ranking em canvas)
 - Comandos de imagens (NekoSia):
   - `/nekosia [category] [count] [additional_tags] [blacklisted_tags] [rating]`
   - `/nekosia_id <image_id>`
@@ -92,6 +95,7 @@ python main.py
 ```txt
 ayana-bot/
 ├── cogs/
+│   ├── leveling.py
 │   ├── moderation.py
 │   ├── nekosia.py
 │   └── utility.py

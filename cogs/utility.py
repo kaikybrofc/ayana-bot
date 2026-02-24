@@ -1,3 +1,5 @@
+import platform
+import sys
 from datetime import datetime
 
 import discord
@@ -17,7 +19,7 @@ COMMAND_DETAILS: dict[str, dict[str, str]] = {
         "uso": "/ping",
         "permissoes": "Nenhuma",
         "escopo": "Servidor e DM",
-        "detalhes": "Exibe a latencia atual entre bot e gateway do Discord.",
+        "detalhes": "Exibe latencias, uptime, memoria, shards, cache, estado WS e contexto da guilda atual.",
     },
     "userinfo": {
         "categoria": "Utilitarios",
@@ -32,6 +34,20 @@ COMMAND_DETAILS: dict[str, dict[str, str]] = {
         "permissoes": "Nenhuma",
         "escopo": "Apenas servidor",
         "detalhes": "Mostra ID, dono, membros, canais, cargos e data de criacao do servidor.",
+    },
+    "rank": {
+        "categoria": "Utilitarios",
+        "uso": "/rank [member]",
+        "permissoes": "Nenhuma",
+        "escopo": "Apenas servidor",
+        "detalhes": "Gera um card em canvas com nivel, XP, posicao e progresso do membro.",
+    },
+    "leaderboard": {
+        "categoria": "Utilitarios",
+        "uso": "/leaderboard [limit]",
+        "permissoes": "Nenhuma",
+        "escopo": "Apenas servidor",
+        "detalhes": "Gera um canvas com o ranking de niveis do servidor por XP.",
     },
     "nekosia": {
         "categoria": "Imagens",
@@ -180,16 +196,17 @@ def ts(dt: datetime | None) -> str:
 class UtilityCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        self.started_at = discord.utils.utcnow()
+        self._cached_owner: discord.User | None = None
 
     def _slash_commands(self) -> list[app_commands.Command]:
-        return sorted(
-            (
-                cmd
-                for cmd in self.bot.tree.walk_commands()
-                if isinstance(cmd, app_commands.Command)
-            ),
-            key=lambda cmd: cmd.qualified_name,
-        )
+        unique_commands: dict[str, app_commands.Command] = {}
+        for cmd in self.bot.tree.walk_commands():
+            if not isinstance(cmd, app_commands.Command):
+                continue
+            unique_commands.setdefault(cmd.qualified_name, cmd)
+
+        return sorted(unique_commands.values(), key=lambda cmd: cmd.qualified_name)
 
     @staticmethod
     def _command_category(command_name: str) -> str:
@@ -224,10 +241,123 @@ class UtilityCog(commands.Cog):
 
         return chunks
 
+    @staticmethod
+    def _format_uptime(total_seconds: int) -> str:
+        remaining = max(total_seconds, 0)
+        days, remaining = divmod(remaining, 86_400)
+        hours, remaining = divmod(remaining, 3_600)
+        minutes, seconds = divmod(remaining, 60)
+
+        parts: list[str] = []
+        if days:
+            parts.append(f"{days}d")
+        if hours or days:
+            parts.append(f"{hours}h")
+        if minutes or hours or days:
+            parts.append(f"{minutes}m")
+        parts.append(f"{seconds}s")
+        return " ".join(parts)
+
+    @staticmethod
+    def _process_memory_mb() -> str:
+        try:
+            import resource
+        except ImportError:
+            return "N/A"
+
+        usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        if usage <= 0:
+            return "N/A"
+
+        # On macOS ru_maxrss is bytes, on Linux it is kilobytes.
+        divisor = 1024 * 1024 if sys.platform == "darwin" else 1024
+        return f"{usage / divisor:.1f} MB"
+
+    async def _system_owner_profile(self) -> str:
+        owner_id = self.bot.owner_id
+        if owner_id is None:
+            return "Nao configurado. Defina `DONO_ID` no `.env`."
+
+        owner = self._cached_owner if self._cached_owner and self._cached_owner.id == owner_id else None
+        if owner is None:
+            owner = self.bot.get_user(owner_id)
+        if owner is None:
+            try:
+                owner = await self.bot.fetch_user(owner_id)
+            except discord.HTTPException:
+                return f"ID: `{owner_id}`\nNao foi possivel carregar o perfil agora."
+
+        self._cached_owner = owner
+        display_name = owner.global_name or owner.name
+        return (
+            f"Nome: `{display_name}`\n"
+            f"Usuario: `{owner}`\n"
+            f"ID: `{owner.id}`\n"
+            f"Criado em: {ts(owner.created_at)}"
+        )
+
     @app_commands.command(name="ping", description="Mostra a latencia atual do bot.")
     async def ping(self, interaction: discord.Interaction) -> None:
+        now = discord.utils.utcnow()
         latency_ms = round(self.bot.latency * 1000)
-        await interaction.response.send_message(f"Pong! `{latency_ms}ms`")
+        interaction_delay_ms = max(0, round((now - interaction.created_at).total_seconds() * 1000))
+        uptime_seconds = int((now - self.started_at).total_seconds())
+        owner_profile = await self._system_owner_profile()
+        guild = interaction.guild
+        shard = guild.shard_id if guild is not None else None
+        shard_count = self.bot.shard_count
+        guild_count = len(self.bot.guilds)
+        cached_users = len(self.bot.users)
+
+        if guild is not None:
+            member_count = guild.member_count if guild.member_count is not None else "N/A"
+            guild_context = (
+                f"Nome: `{guild.name}`\n"
+                f"ID: `{guild.id}`\n"
+                f"Membros: `{member_count}`\n"
+                f"Canais: `{len(guild.channels)}`\n"
+                f"Canal atual: <#{interaction.channel_id}>"
+            )
+        else:
+            guild_context = "Executado em `DM`."
+
+        if shard is not None and shard_count:
+            shard_label = f"{shard + 1}/{shard_count}"
+        elif shard is not None:
+            shard_label = str(shard)
+        elif shard_count:
+            shard_label = f"{shard_count} total"
+        else:
+            shard_label = "N/A"
+
+        embed = discord.Embed(
+            title="Pong!",
+            description="Status atual da conexao do bot.",
+            color=discord.Color.green(),
+            timestamp=now,
+        )
+        embed.add_field(name="Latencia gateway", value=f"`{latency_ms}ms`", inline=True)
+        embed.add_field(name="Atraso da interacao", value=f"`{interaction_delay_ms}ms`", inline=True)
+        embed.add_field(name="Uptime", value=f"`{self._format_uptime(uptime_seconds)}`", inline=True)
+        embed.add_field(name="Shard", value=f"`{shard_label}`", inline=True)
+        embed.add_field(name="Servidores", value=f"`{guild_count}`", inline=True)
+        embed.add_field(name="Usuarios em cache", value=f"`{cached_users}`", inline=True)
+        embed.add_field(
+            name="Estado WS",
+            value="`Rate limited`" if self.bot.is_ws_ratelimited() else "`OK`",
+            inline=True,
+        )
+        embed.add_field(name="RAM (processo)", value=f"`{self._process_memory_mb()}`", inline=True)
+        embed.add_field(name="Comandos slash", value=f"`{len(self._slash_commands())}`", inline=True)
+        embed.add_field(name="Guilda atual", value=guild_context, inline=False)
+        embed.add_field(name="Dono do sistema", value=owner_profile, inline=False)
+        embed.add_field(
+            name="Versoes",
+            value=f"`Python {platform.python_version()}`\n`discord.py {discord.__version__}`",
+            inline=False,
+        )
+
+        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="help", description="Lista os comandos disponiveis.")
     @app_commands.describe(comando="Nome do comando para ver detalhes. Ex.: kick")

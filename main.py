@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from dotenv import load_dotenv
 from warn_store import MySQLConfig, WarnStore
 
 LOGGER = logging.getLogger("ayana")
-EXTENSIONS = ("cogs.utility", "cogs.moderation", "cogs.nekosia")
+EXTENSIONS = ("cogs.utility", "cogs.leveling", "cogs.moderation", "cogs.nekosia")
 
 
 def sanitize_env_value(raw_value: str | None) -> str | None:
@@ -138,6 +139,15 @@ def setup_logging() -> None:
     LOGGER.info("Log configurado em %s", log_file.resolve())
 
 
+def ensure_utf8_runtime() -> None:
+    os.environ.setdefault("PYTHONUTF8", "1")
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is None or not hasattr(stream, "reconfigure"):
+            continue
+        stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 class AyanaBot(commands.Bot):
     def __init__(
         self,
@@ -157,6 +167,31 @@ class AyanaBot(commands.Bot):
         self.warn_store = warn_store
         self.tree.on_error = self.on_app_command_error
 
+    async def _delete_overlapping_global_commands(self) -> int:
+        local_root_names = {
+            cmd.qualified_name.split(" ", 1)[0]
+            for cmd in self.tree.walk_commands()
+            if isinstance(cmd, app_commands.Command)
+        }
+        if not local_root_names:
+            return 0
+
+        removed_count = 0
+        global_commands = await self.tree.fetch_commands()
+        for global_command in global_commands:
+            if global_command.name not in local_root_names:
+                continue
+            try:
+                await global_command.delete()
+                removed_count += 1
+            except discord.HTTPException:
+                LOGGER.warning(
+                    "Nao foi possivel remover comando global '%s' (id=%s).",
+                    global_command.name,
+                    global_command.id,
+                )
+        return removed_count
+
     async def setup_hook(self) -> None:
         await self.warn_store.connect()
         LOGGER.info(
@@ -175,11 +210,17 @@ class AyanaBot(commands.Bot):
                 guild = discord.Object(id=self.sync_guild_id)
                 self.tree.copy_global_to(guild=guild)
                 synced = await self.tree.sync(guild=guild)
+                removed_globals = await self._delete_overlapping_global_commands()
                 LOGGER.info(
                     "Comandos sincronizados na guild %s: %s",
                     self.sync_guild_id,
                     len(synced),
                 )
+                if removed_globals:
+                    LOGGER.info(
+                        "Comandos globais removidos para evitar duplicacao na guild: %s",
+                        removed_globals,
+                    )
             else:
                 synced = await self.tree.sync()
                 LOGGER.info("Comandos globais sincronizados: %s", len(synced))
@@ -259,6 +300,7 @@ class AyanaBot(commands.Bot):
 
 
 def main() -> None:
+    ensure_utf8_runtime()
     load_dotenv()
     setup_logging()
 

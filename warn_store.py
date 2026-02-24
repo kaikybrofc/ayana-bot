@@ -44,6 +44,25 @@ SETTINGS_FIELD_TYPES: dict[str, str] = {
 }
 
 
+def xp_for_next_level(level: int) -> int:
+    safe_level = max(0, int(level))
+    return 100 + (safe_level * 25)
+
+
+def total_xp_for_level(level: int) -> int:
+    safe_level = max(0, int(level))
+    return (100 * safe_level) + ((25 * safe_level * (safe_level - 1)) // 2)
+
+
+def level_from_total_xp(total_xp: int) -> int:
+    remaining = max(0, int(total_xp))
+    level = 0
+    while remaining >= xp_for_next_level(level):
+        remaining -= xp_for_next_level(level)
+        level += 1
+    return level
+
+
 def _to_db_datetime(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -181,11 +200,26 @@ class WarnStore:
             INDEX idx_infractions_action (guild_id, action, created_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
+        create_user_levels = """
+        CREATE TABLE IF NOT EXISTS user_levels (
+            guild_id BIGINT UNSIGNED NOT NULL,
+            user_id BIGINT UNSIGNED NOT NULL,
+            total_xp BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            level INT UNSIGNED NOT NULL DEFAULT 0,
+            message_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, user_id),
+            INDEX idx_user_levels_rank (guild_id, total_xp, user_id),
+            INDEX idx_user_levels_level (guild_id, level, total_xp)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
         async with self.pool.acquire() as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(create_warnings)
                 await cursor.execute(create_guild_settings)
                 await cursor.execute(create_infractions)
+                await cursor.execute(create_user_levels)
                 await self._ensure_warning_expiration_column(cursor)
 
     async def _ensure_warning_expiration_column(self, cursor: aiomysql.Cursor) -> None:
@@ -470,6 +504,137 @@ class WarnStore:
                 rows = await cursor.fetchall()
 
         return list(rows or [])
+
+    async def add_level_xp(self, guild_id: int, user_id: int, xp_gain: int) -> dict[str, Any]:
+        gain = max(0, int(xp_gain))
+        if gain <= 0:
+            raise ValueError("xp_gain deve ser maior que zero.")
+
+        async with self.pool.acquire() as connection:
+            await connection.begin()
+            try:
+                async with connection.cursor(aiomysql.DictCursor) as cursor:
+                    await cursor.execute(
+                        """
+                        SELECT total_xp, level, message_count
+                        FROM user_levels
+                        WHERE guild_id = %s AND user_id = %s
+                        FOR UPDATE
+                        """,
+                        (guild_id, user_id),
+                    )
+                    row = await cursor.fetchone()
+
+                    if row is None:
+                        old_total = 0
+                        old_level = 0
+                        new_total = gain
+                        new_level = level_from_total_xp(new_total)
+                        message_count = 1
+                        await cursor.execute(
+                            """
+                            INSERT INTO user_levels (guild_id, user_id, total_xp, level, message_count)
+                            VALUES (%s, %s, %s, %s, %s)
+                            """,
+                            (guild_id, user_id, new_total, new_level, message_count),
+                        )
+                    else:
+                        old_total = int(row["total_xp"])
+                        old_level = int(row["level"])
+                        new_total = old_total + gain
+                        new_level = level_from_total_xp(new_total)
+                        message_count = int(row["message_count"]) + 1
+                        await cursor.execute(
+                            """
+                            UPDATE user_levels
+                            SET total_xp = %s, level = %s, message_count = %s
+                            WHERE guild_id = %s AND user_id = %s
+                            """,
+                            (new_total, new_level, message_count, guild_id, user_id),
+                        )
+                await connection.commit()
+            except Exception:
+                await connection.rollback()
+                raise
+
+        return {
+            "guild_id": guild_id,
+            "user_id": user_id,
+            "xp_gain": gain,
+            "old_total_xp": old_total,
+            "total_xp": new_total,
+            "old_level": old_level,
+            "level": new_level,
+            "message_count": message_count,
+            "leveled_up": new_level > old_level,
+        }
+
+    async def get_member_level(self, guild_id: int, user_id: int) -> dict[str, Any] | None:
+        async with self.pool.acquire() as connection:
+            async with connection.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    """
+                    SELECT guild_id, user_id, total_xp, level, message_count, created_at, updated_at
+                    FROM user_levels
+                    WHERE guild_id = %s AND user_id = %s
+                    LIMIT 1
+                    """,
+                    (guild_id, user_id),
+                )
+                row = await cursor.fetchone()
+                if row is None:
+                    return None
+
+                total_xp = int(row["total_xp"])
+                await cursor.execute(
+                    """
+                    SELECT COUNT(*) + 1 AS rank_position
+                    FROM user_levels
+                    WHERE guild_id = %s
+                      AND (total_xp > %s OR (total_xp = %s AND user_id < %s))
+                    """,
+                    (guild_id, total_xp, total_xp, user_id),
+                )
+                rank_row = await cursor.fetchone()
+
+        return {
+            "guild_id": int(row["guild_id"]),
+            "user_id": int(row["user_id"]),
+            "total_xp": total_xp,
+            "level": int(row["level"]),
+            "message_count": int(row["message_count"]),
+            "rank_position": int(rank_row["rank_position"]) if rank_row else 1,
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    async def get_level_leaderboard(self, guild_id: int, limit: int = 10) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(limit, 50))
+        async with self.pool.acquire() as connection:
+            async with connection.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    """
+                    SELECT user_id, total_xp, level, message_count
+                    FROM user_levels
+                    WHERE guild_id = %s
+                    ORDER BY total_xp DESC, user_id ASC
+                    LIMIT %s
+                    """,
+                    (guild_id, safe_limit),
+                )
+                rows = await cursor.fetchall()
+
+        normalized: list[dict[str, Any]] = []
+        for row in rows or []:
+            normalized.append(
+                {
+                    "user_id": int(row["user_id"]),
+                    "total_xp": int(row["total_xp"]),
+                    "level": int(row["level"]),
+                    "message_count": int(row["message_count"]),
+                }
+            )
+        return normalized
 
     def _normalize_settings(self, row: dict[str, Any] | None, guild_id: int) -> dict[str, Any]:
         if row is None:
