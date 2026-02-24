@@ -4,6 +4,67 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+COMMAND_DETAILS: dict[str, dict[str, str]] = {
+    "help": {
+        "categoria": "Utilitarios",
+        "uso": "/help [comando]",
+        "permissoes": "Nenhuma",
+        "escopo": "Servidor e DM",
+        "detalhes": "Mostra todos os comandos ou detalhes de um comando especifico.",
+    },
+    "ping": {
+        "categoria": "Utilitarios",
+        "uso": "/ping",
+        "permissoes": "Nenhuma",
+        "escopo": "Servidor e DM",
+        "detalhes": "Exibe a latencia atual entre bot e gateway do Discord.",
+    },
+    "userinfo": {
+        "categoria": "Utilitarios",
+        "uso": "/userinfo [member]",
+        "permissoes": "Nenhuma",
+        "escopo": "Apenas servidor",
+        "detalhes": "Mostra ID, datas, cargo mais alto e quantidade de cargos do membro.",
+    },
+    "serverinfo": {
+        "categoria": "Utilitarios",
+        "uso": "/serverinfo",
+        "permissoes": "Nenhuma",
+        "escopo": "Apenas servidor",
+        "detalhes": "Mostra ID, dono, membros, canais, cargos e data de criacao do servidor.",
+    },
+    "clear": {
+        "categoria": "Moderacao",
+        "uso": "/clear <amount>",
+        "permissoes": "Manage Messages",
+        "escopo": "Apenas servidor",
+        "detalhes": "Apaga de 1 a 100 mensagens no canal atual.",
+    },
+    "kick": {
+        "categoria": "Moderacao",
+        "uso": "/kick <member> [reason]",
+        "permissoes": "Kick Members",
+        "escopo": "Apenas servidor",
+        "detalhes": "Expulsa um membro respeitando hierarquia de cargos.",
+    },
+    "ban": {
+        "categoria": "Moderacao",
+        "uso": "/ban <member> [reason]",
+        "permissoes": "Ban Members",
+        "escopo": "Apenas servidor",
+        "detalhes": "Bane um membro respeitando hierarquia de cargos.",
+    },
+    "restaurar": {
+        "categoria": "Moderacao",
+        "uso": "/restaurar",
+        "permissoes": "Manage Channels + dono do sistema (DONO_ID)",
+        "escopo": "Apenas servidor",
+        "detalhes": "Recria o canal atual com mesmo nome/tipo para limpar mensagens.",
+    },
+}
+
+CATEGORY_ORDER = ("Utilitarios", "Moderacao", "Outros")
+
 
 def ts(dt: datetime | None) -> str:
     if dt is None:
@@ -15,14 +76,8 @@ class UtilityCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="ping", description="Mostra a latencia atual do bot.")
-    async def ping(self, interaction: discord.Interaction) -> None:
-        latency_ms = round(self.bot.latency * 1000)
-        await interaction.response.send_message(f"Pong! `{latency_ms}ms`")
-
-    @app_commands.command(name="help", description="Lista os comandos disponiveis.")
-    async def help(self, interaction: discord.Interaction) -> None:
-        slash_commands = sorted(
+    def _slash_commands(self) -> list[app_commands.Command]:
+        return sorted(
             (
                 cmd
                 for cmd in self.bot.tree.walk_commands()
@@ -31,17 +86,110 @@ class UtilityCog(commands.Cog):
             key=lambda cmd: cmd.qualified_name,
         )
 
-        description_lines = []
+    @staticmethod
+    def _command_category(command_name: str) -> str:
+        details = COMMAND_DETAILS.get(command_name)
+        if details:
+            return details["categoria"]
+        return "Outros"
+
+    @app_commands.command(name="ping", description="Mostra a latencia atual do bot.")
+    async def ping(self, interaction: discord.Interaction) -> None:
+        latency_ms = round(self.bot.latency * 1000)
+        await interaction.response.send_message(f"Pong! `{latency_ms}ms`")
+
+    @app_commands.command(name="help", description="Lista os comandos disponiveis.")
+    @app_commands.describe(comando="Nome do comando para ver detalhes. Ex.: kick")
+    async def help(self, interaction: discord.Interaction, comando: str | None = None) -> None:
+        slash_commands = self._slash_commands()
+        command_index = {cmd.qualified_name: cmd for cmd in slash_commands}
+
+        if comando:
+            lookup = comando.strip().lower().removeprefix("/")
+            target = command_index.get(lookup)
+            if target is None:
+                await interaction.response.send_message(
+                    f"Comando `{lookup}` nao encontrado. Use `/help` para ver a lista.",
+                    ephemeral=True,
+                )
+                return
+
+            details = COMMAND_DETAILS.get(target.qualified_name, {})
+            embed = discord.Embed(
+                title=f"Ajuda de /{target.qualified_name}",
+                description=target.description or "Sem descricao.",
+                color=discord.Color.blurple(),
+            )
+            embed.add_field(
+                name="Uso",
+                value=f"`{details.get('uso', f'/{target.qualified_name}')}`",
+                inline=False,
+            )
+            embed.add_field(
+                name="Categoria",
+                value=details.get("categoria", "Outros"),
+                inline=True,
+            )
+            embed.add_field(
+                name="Escopo",
+                value=details.get("escopo", "Nao informado"),
+                inline=True,
+            )
+            embed.add_field(
+                name="Permissoes",
+                value=details.get("permissoes", "Nao informado"),
+                inline=False,
+            )
+            embed.add_field(
+                name="Detalhes",
+                value=details.get("detalhes", "Sem detalhes adicionais."),
+                inline=False,
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        commands_by_category: dict[str, list[str]] = {name: [] for name in CATEGORY_ORDER}
         for cmd in slash_commands:
-            cmd_description = cmd.description or "Sem descricao."
-            description_lines.append(f"`/{cmd.qualified_name}` - {cmd_description}")
+            category = self._command_category(cmd.qualified_name)
+            if category not in commands_by_category:
+                commands_by_category[category] = []
+            details = COMMAND_DETAILS.get(cmd.qualified_name, {})
+            usage = details.get("uso", f"/{cmd.qualified_name}")
+            perms = details.get("permissoes", "Nenhuma")
+            commands_by_category[category].append(f"`{usage}`\nPermissoes: `{perms}`")
 
         embed = discord.Embed(
-            title="Comandos disponiveis",
-            description="\n".join(description_lines),
+            title="Central de Comandos",
+            description=(
+                "Use `/help comando:<nome>` para ver detalhes completos de um comando.\n"
+                "Exemplo: `/help comando:kick`"
+            ),
             color=discord.Color.blurple(),
         )
+
+        for category in CATEGORY_ORDER:
+            entries = commands_by_category.get(category, [])
+            if entries:
+                embed.add_field(
+                    name=category,
+                    value="\n\n".join(entries),
+                    inline=False,
+                )
+
+        embed.set_footer(text=f"Total de comandos: {len(slash_commands)}")
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @help.autocomplete("comando")
+    async def help_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        del interaction
+        current_normalized = current.lower().strip().removeprefix("/")
+        names = [cmd.qualified_name for cmd in self._slash_commands()]
+        filtered = [name for name in names if current_normalized in name.lower()]
+        return [app_commands.Choice(name=f"/{name}", value=name) for name in filtered[:25]]
 
     @app_commands.command(name="userinfo", description="Mostra informacoes de um usuario.")
     @app_commands.guild_only()

@@ -5,7 +5,7 @@ Bot Discord em Python com comandos *slash* organizados em **cogs**, moderação 
 ## Funcionalidades
 - Estrutura modular com cogs
 - Comandos utilitários:
-  - `/help`
+  - `/help` (lista geral) e `/help comando:<nome>` (detalhado)
   - `/ping`
   - `/userinfo [membro]`
   - `/serverinfo`
