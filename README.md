@@ -38,6 +38,8 @@ Bot Discord em Python com comandos *slash* organizados em **cogs**, moderação 
   - `/welcomesettings`
   - `/setwelcome ...`
   - `/welcometest [membro]`
+  - Envio de DM de boas-vindas desativado por segurança
+- Comandos NekoSia com `safe` por padrão (`suggestive` apenas em canal +18)
 - Sistema de avisos persistente em MySQL
 - Expiração de warns configurável por servidor
 - Escalonamento automático por warns (timeout/ban)

@@ -117,6 +117,26 @@ class WelcomeCog(commands.Cog):
         return rendered[:2000]
 
     @staticmethod
+    def _welcome_allowed_mentions(
+        member: discord.Member,
+        *,
+        mention_user: bool,
+    ) -> discord.AllowedMentions:
+        if mention_user:
+            return discord.AllowedMentions(
+                everyone=False,
+                roles=False,
+                users=[member],
+                replied_user=False,
+            )
+        return discord.AllowedMentions(
+            everyone=False,
+            roles=False,
+            users=False,
+            replied_user=False,
+        )
+
+    @staticmethod
     def _can_assign_role(guild: discord.Guild, role: discord.Role) -> tuple[bool, str | None]:
         if role.is_default():
             return False, "Nao use @everyone como cargo automatico."
@@ -185,27 +205,19 @@ class WelcomeCog(commands.Cog):
             delete_after = min(delete_after_seconds, 86400)
 
         try:
-            await channel.send(content, delete_after=delete_after)
+            await channel.send(
+                content,
+                delete_after=delete_after,
+                allowed_mentions=self._welcome_allowed_mentions(
+                    member,
+                    mention_user=mention_user,
+                ),
+            )
         except (discord.Forbidden, discord.HTTPException):
             LOGGER.warning(
                 "Falha ao enviar mensagem de welcome no canal. guild=%s canal=%s",
                 guild.id,
                 channel.id,
-            )
-
-    async def _send_welcome_dm(self, member: discord.Member, settings: dict[str, Any]) -> None:
-        if not settings.get("welcome_dm_enabled", False):
-            return
-
-        template = settings.get("welcome_dm_message") or DEFAULT_GUILD_SETTINGS["welcome_dm_message"]
-        content = self._format_template(template, member, member.guild, mention_user=False)
-        try:
-            await member.send(content)
-        except (discord.Forbidden, discord.HTTPException):
-            LOGGER.info(
-                "DM de welcome nao enviada (DM fechada ou sem permissao). guild=%s user=%s",
-                member.guild.id,
-                member.id,
             )
 
     @commands.Cog.listener()
@@ -227,7 +239,6 @@ class WelcomeCog(commands.Cog):
 
         await self._apply_auto_roles(member, settings)
         await self._send_welcome_channel_message(member, settings)
-        await self._send_welcome_dm(member, settings)
 
     @app_commands.command(name="welcomesettings", description="Mostra as configuracoes do sistema de boas-vindas.")
     @app_commands.guild_only()
@@ -283,8 +294,8 @@ class WelcomeCog(commands.Cog):
         embed.add_field(
             name="DM",
             value=(
-                f"Status: `{self._bool_status(bool(settings.get('welcome_dm_enabled', False)))}`\n"
-                f"```{self._truncate(str(settings.get('welcome_dm_message') or ''), 700)}```"
+                "Status: `Desligado (fixo)`\n"
+                "```Envio de DM de boas-vindas desativado por seguranca.```"
             ),
             inline=False,
         )
@@ -296,7 +307,10 @@ class WelcomeCog(commands.Cog):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="setwelcome", description="Configura o sistema de boas-vindas (canal, cargo auto, mensagens e DM).")
+    @app_commands.command(
+        name="setwelcome",
+        description="Configura o sistema de boas-vindas (canal, cargo auto e mensagens no canal).",
+    )
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -306,13 +320,13 @@ class WelcomeCog(commands.Cog):
         auto_role="Cargo automatico para novos membros.",
         mention_user="Mencionar o usuario na mensagem do canal.",
         delete_after_seconds="Apagar mensagem apos X segundos (0 nao apaga).",
-        dm_enabled="Liga/desliga envio de DM de boas-vindas.",
+        dm_enabled="(Desativado) mantido apenas por compatibilidade.",
         message="Template da mensagem no canal.",
-        dm_message="Template da mensagem por DM.",
+        dm_message="(Desativado) mantido apenas por compatibilidade.",
         clear_channel="Limpar canal de boas-vindas configurado.",
         clear_auto_role="Limpar cargo automatico configurado.",
         reset_message="Voltar mensagem do canal para o padrao.",
-        reset_dm_message="Voltar mensagem de DM para o padrao.",
+        reset_dm_message="(Desativado) mantido apenas por compatibilidade.",
     )
     async def setwelcome(
         self,
@@ -364,6 +378,7 @@ class WelcomeCog(commands.Cog):
             return
 
         updates: dict[str, Any] = {}
+        dm_option_requested = dm_enabled is not None or dm_message is not None or reset_dm_message
 
         if enabled is not None:
             updates["welcome_enabled"] = enabled
@@ -388,9 +403,6 @@ class WelcomeCog(commands.Cog):
         if delete_after_seconds is not None:
             updates["welcome_delete_after_seconds"] = int(delete_after_seconds)
 
-        if dm_enabled is not None:
-            updates["welcome_dm_enabled"] = dm_enabled
-
         if reset_message:
             updates["welcome_message"] = DEFAULT_GUILD_SETTINGS["welcome_message"]
         elif message is not None:
@@ -403,17 +415,9 @@ class WelcomeCog(commands.Cog):
                 return
             updates["welcome_message"] = clean_message[:1500]
 
-        if reset_dm_message:
+        if dm_option_requested:
+            updates["welcome_dm_enabled"] = False
             updates["welcome_dm_message"] = DEFAULT_GUILD_SETTINGS["welcome_dm_message"]
-        elif dm_message is not None:
-            clean_dm_message = dm_message.strip()
-            if not clean_dm_message:
-                await interaction.response.send_message(
-                    "A mensagem de DM nao pode ser vazia.",
-                    ephemeral=True,
-                )
-                return
-            updates["welcome_dm_message"] = clean_dm_message[:1500]
 
         if not updates:
             await interaction.response.send_message(
@@ -448,7 +452,12 @@ class WelcomeCog(commands.Cog):
                 f"Auto-role(s): {roles_text}\n"
                 f"Mencionar usuario: `{self._bool_status(bool(settings.get('welcome_mention_user', True)))}`\n"
                 f"Delete after: `{delete_after}s`\n"
-                f"DM: `{self._bool_status(bool(settings.get('welcome_dm_enabled', False)))}`"
+                "DM: `Desligado (fixo)`\n"
+                + (
+                    "Obs: opcoes de DM de boas-vindas foram ignoradas por seguranca."
+                    if dm_option_requested
+                    else "Obs: envio de DM de boas-vindas permanece desativado por seguranca."
+                )
             ),
             ephemeral=True,
         )
@@ -527,14 +536,6 @@ class WelcomeCog(commands.Cog):
                 ephemeral=True,
             )
             return
-
-        if settings.get("welcome_dm_enabled", False):
-            dm_template = settings.get("welcome_dm_message") or DEFAULT_GUILD_SETTINGS["welcome_dm_message"]
-            dm_preview = self._format_template(dm_template, target, guild, mention_user=False)
-            await interaction.followup.send(
-                f"Preview DM:\n```{self._truncate(dm_preview, 1700)}```",
-                ephemeral=True,
-            )
 
 
 async def setup(bot: commands.Bot) -> None:

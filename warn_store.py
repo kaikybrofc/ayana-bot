@@ -66,14 +66,36 @@ SETTINGS_FIELD_TYPES: dict[str, str] = {
 }
 
 
+LEVEL_XP_BASE = 120
+LEVEL_XP_LINEAR_STEP = 35
+LEVEL_XP_QUADRATIC_STEP = 5
+
+
 def xp_for_next_level(level: int) -> int:
     safe_level = max(0, int(level))
-    return 100 + (safe_level * 25)
+    # Curva progressiva: cada nivel exige mais XP que o anterior.
+    return (
+        LEVEL_XP_BASE
+        + (LEVEL_XP_LINEAR_STEP * safe_level)
+        + (LEVEL_XP_QUADRATIC_STEP * safe_level * safe_level)
+    )
 
 
 def total_xp_for_level(level: int) -> int:
     safe_level = max(0, int(level))
-    return (100 * safe_level) + ((25 * safe_level * (safe_level - 1)) // 2)
+    if safe_level <= 0:
+        return 0
+
+    # Soma de i=0..n-1 de:
+    # BASE + LINEAR*i + QUADRATIC*i^2
+    n = safe_level
+    linear_sum = (n * (n - 1)) // 2
+    quadratic_sum = ((n - 1) * n * ((2 * n) - 1)) // 6
+    return (
+        (LEVEL_XP_BASE * n)
+        + (LEVEL_XP_LINEAR_STEP * linear_sum)
+        + (LEVEL_XP_QUADRATIC_STEP * quadratic_sum)
+    )
 
 
 def level_from_total_xp(total_xp: int) -> int:

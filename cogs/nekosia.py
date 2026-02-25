@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import time
 from typing import Any
 from urllib.parse import quote
@@ -28,6 +29,18 @@ MAIN_CATEGORIES = (
 
 NO_RESULTS_MESSAGE_PREFIX = "No images matching the specified criteria were found."
 BLACKLIST_MESSAGE_PREFIX = "That tag is on the blacklist."
+AGE_RESTRICTED_HINTS = (
+    "ero",
+    "ecchi",
+    "hentai",
+    "nsfw",
+    "lewd",
+    "explicit",
+    "r18",
+    "18+",
+    "smut",
+)
+AGE_RESTRICTED_RATINGS = {"suggestive", "nsfw", "explicit", "r18"}
 
 
 class NekosiaRequestError(RuntimeError):
@@ -102,6 +115,30 @@ def _is_expected_filter_error(message: str) -> bool:
     return normalized.startswith(NO_RESULTS_MESSAGE_PREFIX) or normalized.startswith(
         BLACKLIST_MESSAGE_PREFIX
     )
+
+
+def _is_age_restricted_rating(value: str) -> bool:
+    return value.strip().lower() in AGE_RESTRICTED_RATINGS
+
+
+def _contains_age_restricted_hint(value: str | None) -> bool:
+    if not value:
+        return False
+    normalized = value.strip().lower()
+    if not normalized:
+        return False
+    compact = re.sub(r"[\s_\-]+", "", normalized)
+    for hint in AGE_RESTRICTED_HINTS:
+        token = hint.lower()
+        if token.isalpha():
+            if re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", normalized):
+                return True
+        elif token in normalized:
+            return True
+        compact_token = token.replace("+", "")
+        if compact_token and compact_token in compact:
+            return True
+    return False
 
 
 class NekosiaCog(commands.Cog):
@@ -229,6 +266,44 @@ class NekosiaCog(commands.Cog):
         self._tags_cache_at = now
         return catalog
 
+    @staticmethod
+    def _is_age_restricted_context(interaction: discord.Interaction) -> bool:
+        if interaction.guild is None:
+            return False
+        channel = interaction.channel
+        if channel is None:
+            return False
+
+        checker = getattr(channel, "is_nsfw", None)
+        if callable(checker):
+            try:
+                if checker():
+                    return True
+            except TypeError:
+                pass
+
+        parent = getattr(channel, "parent", None)
+        parent_checker = getattr(parent, "is_nsfw", None)
+        if callable(parent_checker):
+            try:
+                return bool(parent_checker())
+            except TypeError:
+                return False
+        return False
+
+    def _requires_age_restricted_channel(
+        self,
+        *,
+        category: str,
+        additional_tags: str | None,
+        rating: str,
+    ) -> bool:
+        if _is_age_restricted_rating(rating):
+            return True
+        if _contains_age_restricted_hint(category):
+            return True
+        return any(_contains_age_restricted_hint(tag) for tag in _split_csv(additional_tags))
+
     @app_commands.command(name="nekosia", description="Busca imagens na API NekoSia.")
     @app_commands.choices(
         rating=[
@@ -241,7 +316,7 @@ class NekosiaCog(commands.Cog):
         count="Quantidade de imagens (1 a 5).",
         additional_tags="Tags extras separadas por virgula.",
         blacklisted_tags="Tags para excluir separadas por virgula.",
-        rating="Filtro de classificacao de conteudo.",
+        rating="Filtro de classificacao de conteudo (suggestive exige canal +18).",
     )
     async def nekosia(
         self,
@@ -260,21 +335,39 @@ class NekosiaCog(commands.Cog):
             )
             return
 
+        normalized_additional = _clean_csv(additional_tags)
+        normalized_blacklist = _clean_csv(blacklisted_tags)
+        normalized_rating = (rating or "safe").strip().lower()
+        if normalized_rating not in {"safe", "suggestive"}:
+            await interaction.response.send_message(
+                "Rating invalido. Use `safe` ou `suggestive`.",
+                ephemeral=True,
+            )
+            return
+
+        if self._requires_age_restricted_channel(
+            category=requested_category,
+            additional_tags=normalized_additional,
+            rating=normalized_rating,
+        ) and not self._is_age_restricted_context(interaction):
+            await interaction.response.send_message(
+                "Conteudo suggestive/NSFW so pode ser consultado em canal marcado como +18.",
+                ephemeral=True,
+            )
+            return
+
         await interaction.response.defer(thinking=True)
 
         query_params: dict[str, str | int] = {
             "count": int(count),
             "session": "id",
             "id": str(interaction.user.id),
+            "rating": normalized_rating,
         }
-        normalized_additional = _clean_csv(additional_tags)
-        normalized_blacklist = _clean_csv(blacklisted_tags)
         if normalized_additional:
             query_params["additionalTags"] = normalized_additional
         if normalized_blacklist:
             query_params["blacklistedTags"] = normalized_blacklist
-        if rating:
-            query_params["rating"] = rating
 
         endpoint = f"/images/{quote(requested_category, safe='')}"
         fallback_used = False
@@ -336,6 +429,16 @@ class NekosiaCog(commands.Cog):
             )
             return
 
+        if not self._is_age_restricted_context(interaction):
+            safe_images = [image for image in images if not _is_age_restricted_rating(_rating_value(image))]
+            if not safe_images:
+                await interaction.followup.send(
+                    "A resposta continha apenas conteudo +18 e foi bloqueada neste canal.",
+                    ephemeral=True,
+                )
+                return
+            images = safe_images
+
         embeds = [
             self._build_image_embed(image, index + 1, len(images))
             for index, image in enumerate(images[:MAX_IMAGES_PER_REQUEST])
@@ -382,6 +485,15 @@ class NekosiaCog(commands.Cog):
             LOGGER.warning("Falha na consulta NekoSia por ID '%s': %s", normalized_id, exc)
             await interaction.followup.send(f"Falha ao consultar NekoSia: {exc}", ephemeral=True)
             return
+
+        if not self._is_age_restricted_context(interaction):
+            image_rating = _rating_value(payload)
+            if _is_age_restricted_rating(image_rating):
+                await interaction.followup.send(
+                    "Esta imagem e classificada como +18 e nao pode ser exibida neste canal.",
+                    ephemeral=True,
+                )
+                return
 
         embeds = [self._build_image_embed(payload, 1, 1)]
         await interaction.followup.send(embeds=embeds)

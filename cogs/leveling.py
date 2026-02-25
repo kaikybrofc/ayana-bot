@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import random
+import time
 import unicodedata
 from contextlib import nullcontext
 from typing import Any
@@ -41,10 +42,12 @@ class LevelingCog(commands.Cog):
     BOARD_HEIGHT = 500
     BOARD_ROW_HEIGHT = 54
     BOARD_MAX_ROWS = 5
+    XP_COOLDOWN_SECONDS = 30.0
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self._rng = random.Random()
+        self._xp_cooldowns: dict[tuple[int, int], float] = {}
 
     def _warn_store(self):
         warn_store = getattr(self.bot, "warn_store", None)
@@ -1400,6 +1403,23 @@ class LevelingCog(commands.Cog):
         xp_gain = 8 + length_bonus + attachment_bonus + sticker_bonus + random_bonus
         return max(10, min(xp_gain, 40))
 
+    def _is_xp_rate_limited(self, guild_id: int, user_id: int) -> bool:
+        now = time.monotonic()
+        key = (guild_id, user_id)
+        last_award = self._xp_cooldowns.get(key)
+        if last_award is not None and (now - last_award) < self.XP_COOLDOWN_SECONDS:
+            return True
+
+        self._xp_cooldowns[key] = now
+        if len(self._xp_cooldowns) > 50_000:
+            cutoff = now - (self.XP_COOLDOWN_SECONDS * 4)
+            self._xp_cooldowns = {
+                cache_key: ts
+                for cache_key, ts in self._xp_cooldowns.items()
+                if ts >= cutoff
+            }
+        return False
+
     async def _announce_level_up(self, message: discord.Message, payload: dict[str, Any]) -> None:
         level = int(payload["level"])
         total_xp = int(payload["total_xp"])
@@ -1407,10 +1427,11 @@ class LevelingCog(commands.Cog):
         try:
             await message.channel.send(
                 (
-                    f"{message.author.mention} subiu para o nivel `{level}`. "
+                    f"{message.author.display_name} subiu para o nivel `{level}`. "
                     f"XP total: `{total_xp}` | Proximo nivel em `{missing_xp}` XP."
                 ),
                 delete_after=12,
+                allowed_mentions=discord.AllowedMentions.none(),
             )
         except (discord.Forbidden, discord.HTTPException):
             LOGGER.warning(
@@ -1425,6 +1446,8 @@ class LevelingCog(commands.Cog):
         if not self._is_eligible_message(message):
             return
         if message.guild is None or not isinstance(message.author, discord.Member):
+            return
+        if self._is_xp_rate_limited(message.guild.id, message.author.id):
             return
 
         xp_gain = self._xp_gain_for_message(message)

@@ -16,11 +16,13 @@ ROLE_ID_RE = re.compile(r"\d{17,20}")
 
 class ModerationCog(commands.Cog):
     SETTINGS_CACHE_TTL = 30.0
+    AUTOMOD_NOTICE_COOLDOWN_SECONDS = 45.0
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self._settings_cache: dict[int, tuple[float, dict[str, Any]]] = {}
         self._spam_buckets: dict[tuple[int, int], deque[float]] = defaultdict(deque)
+        self._automod_notice_buckets: dict[tuple[int, int], float] = {}
 
     @staticmethod
     def _build_reason(actor: discord.Member, reason: str | None) -> str:
@@ -175,6 +177,15 @@ class ModerationCog(commands.Cog):
         if warn_store is None:
             raise RuntimeError("WarnStore nao inicializado.")
         return warn_store
+
+    def _should_send_automod_notice(self, guild_id: int, user_id: int) -> bool:
+        now = time.monotonic()
+        key = (guild_id, user_id)
+        last_sent = self._automod_notice_buckets.get(key)
+        if last_sent is not None and (now - last_sent) < self.AUTOMOD_NOTICE_COOLDOWN_SECONDS:
+            return False
+        self._automod_notice_buckets[key] = now
+        return True
 
     def _invalidate_settings_cache(self, guild_id: int) -> None:
         self._settings_cache.pop(guild_id, None)
@@ -484,14 +495,19 @@ class ModerationCog(commands.Cog):
         active = warning_result["active_warnings"]
         total = warning_result["total_warnings"]
         escalation = warning_result["escalation"]
-        short_notice = (
-            f"{member.mention}, sua mensagem foi removida pelo AutoMod "
-            f"e voce recebeu um warn (#{warning_id})."
-        )
-        try:
-            await message.channel.send(short_notice, delete_after=10)
-        except (discord.Forbidden, discord.HTTPException):
-            pass
+        if self._should_send_automod_notice(guild.id, member.id):
+            short_notice = (
+                f"AutoMod: mensagem de `{member.display_name}` removida e warn registrado "
+                f"(#{warning_id})."
+            )
+            try:
+                await message.channel.send(
+                    short_notice,
+                    delete_after=10,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                pass
 
         modlog_description = (
             f"Usuario: {member.mention} (`{member.id}`)\n"
