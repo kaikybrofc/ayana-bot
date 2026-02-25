@@ -73,6 +73,21 @@ def parse_positive_int(raw_value: str | None, var_name: str, default: int) -> in
     return parsed
 
 
+def parse_bool_env(raw_value: str | None, var_name: str, default: bool = False) -> bool:
+    normalized = sanitize_env_value(raw_value)
+    if normalized is None:
+        return default
+
+    lowered = normalized.lower()
+    truthy = {"1", "true", "yes", "y", "on", "enable", "enabled"}
+    falsy = {"0", "false", "no", "n", "off", "disable", "disabled"}
+    if lowered in truthy:
+        return True
+    if lowered in falsy:
+        return False
+    raise RuntimeError(f"{var_name} deve ser true/false (ou 1/0).")
+
+
 def load_mysql_config_from_env() -> MySQLConfig:
     host = sanitize_env_value(os.getenv("DB_HOST")) or "localhost"
     user = sanitize_env_value(os.getenv("DB_USER"))
@@ -154,10 +169,13 @@ class AyanaBot(commands.Bot):
         guild_id: int | None,
         owner_id: int | None,
         warn_store: WarnStore,
+        *,
+        members_intent_enabled: bool,
+        message_content_intent_enabled: bool,
     ) -> None:
         intents = discord.Intents.default()
-        intents.members = True
-        intents.message_content = True
+        intents.members = members_intent_enabled
+        intents.message_content = message_content_intent_enabled
         super().__init__(
             command_prefix=commands.when_mentioned,
             intents=intents,
@@ -308,6 +326,16 @@ def main() -> None:
     token = sanitize_token(os.getenv("DISCORD_TOKEN"))
     guild_id = parse_discord_id(os.getenv("GUILD_ID"))
     owner_id = parse_discord_id(os.getenv("DONO_ID"))
+    members_intent_enabled = parse_bool_env(
+        os.getenv("ENABLE_MEMBERS_INTENT"),
+        "ENABLE_MEMBERS_INTENT",
+        default=False,
+    )
+    message_content_intent_enabled = parse_bool_env(
+        os.getenv("ENABLE_MESSAGE_CONTENT_INTENT"),
+        "ENABLE_MESSAGE_CONTENT_INTENT",
+        default=False,
+    )
     mysql_config = load_mysql_config_from_env()
 
     if not token:
@@ -320,13 +348,30 @@ def main() -> None:
         LOGGER.warning("GUILD_ID invalido. Sync sera global.")
     if os.getenv("DONO_ID") and owner_id is None:
         LOGGER.warning("DONO_ID invalido. owner_id nao sera definido.")
+    if not members_intent_enabled:
+        LOGGER.warning(
+            "ENABLE_MEMBERS_INTENT desativado: welcome por entrada e operacoes em massa podem ficar limitados."
+        )
+    if not message_content_intent_enabled:
+        LOGGER.warning(
+            "ENABLE_MESSAGE_CONTENT_INTENT desativado: AutoMod por conteudo e leveling por mensagens ficam limitados."
+        )
 
     bot = AyanaBot(
         guild_id=guild_id,
         owner_id=owner_id,
         warn_store=WarnStore(mysql_config),
+        members_intent_enabled=members_intent_enabled,
+        message_content_intent_enabled=message_content_intent_enabled,
     )
-    bot.run(token, log_handler=None)
+    try:
+        bot.run(token, log_handler=None)
+    except discord.errors.PrivilegedIntentsRequired as exc:
+        raise RuntimeError(
+            "Intents privilegiados nao habilitados no Developer Portal. "
+            "Habilite os intents necessarios no portal ou defina "
+            "ENABLE_MEMBERS_INTENT/ENABLE_MESSAGE_CONTENT_INTENT=false no .env."
+        ) from exc
 
 
 if __name__ == "__main__":

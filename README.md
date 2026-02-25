@@ -74,6 +74,8 @@ cp .env.example .env
 DISCORD_TOKEN=seu_token_do_bot
 GUILD_ID=123456789012345678
 DONO_ID=123456789012345678
+ENABLE_MEMBERS_INTENT=false
+ENABLE_MESSAGE_CONTENT_INTENT=false
 DB_HOST=localhost
 DB_PORT=3306
 DB_USER=seu_usuario_mysql
@@ -86,6 +88,8 @@ Observações:
 - `DISCORD_TOKEN`: token da aba **Bot** no Discord Developer Portal.
 - `GUILD_ID`: ID do servidor para sincronização rápida dos comandos (opcional, mas recomendado).
 - `DONO_ID`: seu ID de usuário no Discord (opcional, usado como `owner_id` do bot).
+- `ENABLE_MEMBERS_INTENT`: `true/false` para ligar `SERVER MEMBERS INTENT` no codigo (padrao `false`).
+- `ENABLE_MESSAGE_CONTENT_INTENT`: `true/false` para ligar `MESSAGE CONTENT INTENT` no codigo (padrao `false`).
 - `DB_HOST`/`DB_PORT`: host e porta do MySQL.
 - `DB_USER`/`DB_PASSWORD`: credenciais do usuário MySQL.
 - `DB_NAME`: nome do banco que sera usado pelo bot.
@@ -112,6 +116,7 @@ ayana-bot/
 ├── .gitignore
 ├── main.py
 ├── requirements.txt
+├── LICENSE
 └── README.md
 ```
 
@@ -127,10 +132,15 @@ Para os comandos de moderação funcionarem corretamente, conceda ao bot:
 - View Channel + Send Messages (nos canais de log)
 
 ## Intents
-- Ative `MESSAGE CONTENT INTENT` no Discord Developer Portal para o AutoMod funcionar.
-- Ative `SERVER MEMBERS INTENT` para funcionalidades de welcome e cargos em massa funcionarem em todos os membros.
+- O bot so requisita intents privilegiados quando as variaveis abaixo estao como `true` no `.env`:
+  - `ENABLE_MESSAGE_CONTENT_INTENT=true` para recursos que dependem do conteudo de mensagem (AutoMod/leveling).
+  - `ENABLE_MEMBERS_INTENT=true` para recursos que dependem da listagem/eventos de membros (welcome em entrada e operacoes em massa).
+- Se ativar qualquer uma dessas flags no `.env`, ative o respectivo intent no Discord Developer Portal para evitar erro de `PrivilegedIntentsRequired`.
 
 ## Logs e erros
 - Os logs são gravados no console e em `logs/bot.log` (com rotação automática).
 - Erros comuns de permissão/uso em DM/checks são tratados com resposta amigável.
 - Erros inesperados são registrados com stack trace no log.
+
+## Licença
+Este projeto está sob a licença MIT. Veja o arquivo `LICENSE`.
