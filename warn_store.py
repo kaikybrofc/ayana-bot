@@ -162,10 +162,14 @@ class WarnStore:
         )
         try:
             async with bootstrap.cursor() as cursor:
-                await cursor.execute(
-                    f"CREATE DATABASE IF NOT EXISTS `{self.config.database}` "
-                    "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-                )
+                await cursor.execute("SET SESSION sql_notes = 0")
+                try:
+                    await cursor.execute(
+                        f"CREATE DATABASE IF NOT EXISTS `{self.config.database}` "
+                        "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+                    )
+                finally:
+                    await cursor.execute("SET SESSION sql_notes = 1")
         finally:
             bootstrap.close()
 
@@ -268,12 +272,16 @@ class WarnStore:
         """
         async with self.pool.acquire() as connection:
             async with connection.cursor() as cursor:
-                await cursor.execute(create_warnings)
-                await cursor.execute(create_guild_settings)
-                await cursor.execute(create_infractions)
-                await cursor.execute(create_user_levels)
-                await self._ensure_warning_expiration_column(cursor)
-                await self._ensure_guild_settings_columns(cursor)
+                await cursor.execute("SET SESSION sql_notes = 0")
+                try:
+                    await cursor.execute(create_warnings)
+                    await cursor.execute(create_guild_settings)
+                    await cursor.execute(create_infractions)
+                    await cursor.execute(create_user_levels)
+                    await self._ensure_warning_expiration_column(cursor)
+                    await self._ensure_guild_settings_columns(cursor)
+                finally:
+                    await cursor.execute("SET SESSION sql_notes = 1")
 
     async def _ensure_warning_expiration_column(self, cursor: aiomysql.Cursor) -> None:
         await cursor.execute("SHOW COLUMNS FROM warnings LIKE 'expires_at'")

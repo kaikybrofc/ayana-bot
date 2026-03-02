@@ -1,6 +1,11 @@
 # Ambiente local
 .env
+.env.*
+!.env.example
+
+# Ambientes virtuais locais
 .venv/
+venv/
 
 # Python cache/build
 __pycache__/
@@ -11,9 +16,19 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 
 # Logs
 logs/
+*.log
+
+# Processo local
+ecosystem.config.js
 
 # Ferramentas/IDE
 .vscode/
