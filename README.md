@@ -1,146 +1,181 @@
-# Ayana Bot (Discord)
+# 🌸 Ayana Bot
 
-Bot Discord em Python com comandos *slash* organizados em **cogs**, moderação básica, logs e tratamento global de erros.
+[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Discord.py](https://img.shields.io/badge/discord.py-2.4.0-blue.svg)](https://discordpy.readthedocs.io/en/stable/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![MySQL](https://img.shields.io/badge/MySQL-8.0%2B-orange.svg)](https://www.mysql.com/)
 
-## Funcionalidades
-- Estrutura modular com cogs
-- Sistema de nivel e XP por mensagens (contabiliza toda mensagem de usuario)
-- Comandos utilitários:
-  - `/help` (lista geral) e `/help comando:<nome>` (detalhado)
-  - `/ping`
-  - `/userinfo [membro]`
-  - `/serverinfo`
-  - `/rank [membro]` (card em canvas)
-  - `/leaderboard [limite]` (ranking em canvas)
-- Comandos de imagens (NekoSia):
-  - `/nekosia [category] [count] [additional_tags] [blacklisted_tags] [rating]`
-  - `/nekosia_id <image_id>`
-  - `/nekosia_tags [tipo] [termo]`
-- Comandos de moderação:
-  - `/clear <quantidade>`
-  - `/kick <membro> [motivo]`
-  - `/ban <membro> [motivo]`
-  - `/unban <usuario_banido_ou_id> [motivo]`
-  - `/timeout <membro> <duracao> [motivo]` (ex.: `30m`, `2h`, `1d`)
-  - `/untimeout <membro> [motivo]`
-  - `/warn <membro> <motivo>`
-  - `/warnings <membro>`
-  - `/clearwarnings <membro>`
-  - `/infractions <membro> [limite]`
-  - `/settings`
-  - `/setmodlog [canal]`
-  - `/setautomodlog [canal]`
-  - `/setwarnpolicy ...`
-  - `/setautomod ...`
-  - `/addroleall <cargo> [include_bots]`
-  - `/restaurar` (somente dono do sistema)
-- Sistema de boas-vindas configurável:
-  - `/welcomesettings`
-  - `/setwelcome ...`
-  - `/welcometest [membro]`
-  - Envio de DM de boas-vindas desativado por segurança
-- Comandos NekoSia com `safe` por padrão (`suggestive` apenas em canal +18)
-- Sistema de avisos persistente em MySQL
-- Expiração de warns configurável por servidor
-- Escalonamento automático por warns (timeout/ban)
-- AutoMod básico (anti-spam, anti-link, anti-mention flood)
-- Configuração por servidor em `guild_settings` (moderacao, automod e welcome)
-- Auditoria unificada em `infractions`
-- Logs no terminal e em arquivo (`logs/bot.log`)
-- Tratamento global de erros para comandos *slash*
+Um bot multifuncional para Discord desenvolvido em Python, focado em moderação avançada, sistema de níveis com interface gráfica (Canvas) e integração com APIs de imagens.
 
-## Requisitos
-- Python 3.10+
-- Conta e aplicação no Discord Developer Portal
-- MySQL 8+ (ou compatível)
+---
 
-## Configuração
-1. Crie e ative seu ambiente virtual.
-2. Instale as dependências:
+## 🚀 Funcionalidades Principais
 
-```bash
-pip install -r requirements.txt
-```
+### 🛡️ Moderação & AutoMod
+- **Sistema de Warns Persistente**: Avisos armazenados em MySQL com expiração configurável.
+- **Escalonamento Automático**: Punições automáticas (Timeout/Ban) baseadas no acúmulo de avisos.
+- **AutoMod Inteligente**: Proteção contra Anti-Spam, Anti-Link e Flood de menções.
+- **Logs de Auditoria**: Registro detalhado de infrações e ações administrativas em canais dedicados.
+- **Hierarquia de Segurança**: Verificação rigorosa de cargos para impedir abusos.
 
-3. Copie o arquivo de exemplo e configure suas variáveis:
+### 📈 Sistema de Níveis (Leveling)
+- **XP por Mensagem**: Contabilização dinâmica de experiência com cooldown para evitar spam.
+- **Rank Cards**: Geração de cartões de perfil personalizados usando Pillow (Canvas) com barra de progresso.
+- **Leaderboard Visual**: Ranking do servidor renderizado em imagem de alta qualidade.
+- **Persistência de Dados**: Progresso salvo de forma robusta no banco de dados.
 
-```bash
-cp .env.example .env
-```
+### 🖼️ Integração NekoSia
+- **Busca de Imagens**: Acesso à API NekoSia com filtros por categoria, tags e animes.
+- **Filtro de Conteúdo**: Sistema inteligente que alterna entre `safe` e `suggestive` dependendo do canal (NSFW check).
 
-4. Edite o `.env`:
+### 🏠 Boas-Vindas & Utilidades
+- **Welcome System**: Mensagens de entrada totalmente configuráveis.
+- **Comandos Utilitários**: Informações de usuário, servidor, ping avançado e muito mais.
+- **Help Dinâmico**: Menu de ajuda detalhado com busca por comandos específicos.
 
-```env
-DISCORD_TOKEN=seu_token_do_bot
-GUILD_ID=123456789012345678
-DONO_ID=123456789012345678
-ENABLE_MEMBERS_INTENT=false
-ENABLE_MESSAGE_CONTENT_INTENT=false
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=seu_usuario_mysql
-DB_PASSWORD=sua_senha_mysql
-DB_NAME=ayana
-DB_POOL_LIMIT=10
-```
+---
 
-Observações:
-- `DISCORD_TOKEN`: token da aba **Bot** no Discord Developer Portal.
-- `GUILD_ID`: ID do servidor para sincronização rápida dos comandos (opcional, mas recomendado).
-- `DONO_ID`: seu ID de usuário no Discord (opcional, usado como `owner_id` do bot).
-- `ENABLE_MEMBERS_INTENT`: `true/false` para ligar `SERVER MEMBERS INTENT` no codigo (padrao `false`).
-- `ENABLE_MESSAGE_CONTENT_INTENT`: `true/false` para ligar `MESSAGE CONTENT INTENT` no codigo (padrao `false`).
-- `DB_HOST`/`DB_PORT`: host e porta do MySQL.
-- `DB_USER`/`DB_PASSWORD`: credenciais do usuário MySQL.
-- `DB_NAME`: nome do banco que sera usado pelo bot.
-- `DB_POOL_LIMIT`: limite maximo de conexoes no pool.
-- Se o banco informado em `DB_NAME` nao existir, o bot cria automaticamente na inicializacao.
-- O bot tambem cria/atualiza automaticamente as tabelas `warnings`, `guild_settings`, `infractions` e `user_levels`.
+## 🛠️ Tecnologias Utilizadas
 
-## Execução
-```bash
-python main.py
-```
+- **Linguagem**: [Python 3.10+](https://www.python.org/)
+- **Framework**: [Discord.py 2.4](https://discordpy.readthedocs.io/)
+- **Banco de Dados**: [MySQL](https://www.mysql.com/) / [aiomysql](https://github.com/aio-libs/aiomysql)
+- **Processamento de Imagem**: [Pillow](https://python-pillow.org/) & [Pilmoji](https://github.com/dtimofeev/pilmoji)
+- **Outros**: `aiohttp`, `python-dotenv`, `regex`.
 
-## Estrutura do projeto
-```txt
+---
+
+## 📋 Pré-requisitos
+
+- Python 3.10 ou superior.
+- Instância do MySQL 8.0+.
+- Token do bot no [Discord Developer Portal](https://discord.com/developers/applications).
+
+---
+
+## ⚙️ Configuração & Instalação
+
+1. **Clone o repositório:**
+   ```bash
+   git clone https://github.com/seu-usuario/ayana-bot.git
+   cd ayana-bot
+   ```
+
+2. **Crie um ambiente virtual:**
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # Linux/macOS
+   # ou
+   .\venv\Scripts\activate  # Windows
+   ```
+
+3. **Instale as dependências:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Configure as variáveis de ambiente:**
+   Copie o arquivo `.env.example` para `.env` e preencha os campos:
+   ```bash
+   cp .env.example .env
+   ```
+
+   **Exemplo de `.env`:**
+   ```env
+   DISCORD_TOKEN=seu_token_aqui
+   GUILD_ID=123456789012345678
+   DONO_ID=123456789012345678
+   
+   # Database
+   DB_HOST=localhost
+   DB_USER=root
+   DB_PASSWORD=sua_senha
+   DB_NAME=ayana
+   
+   # Intents (Ative no Portal do Desenvolvedor)
+   ENABLE_MEMBERS_INTENT=true
+   ENABLE_MESSAGE_CONTENT_INTENT=true
+   ```
+
+---
+
+## 📂 Estrutura do Projeto
+
+```text
 ayana-bot/
-├── cogs/
-│   ├── leveling.py
-│   ├── moderation.py
-│   ├── nekosia.py
-│   ├── welcome.py
-│   └── utility.py
-├── warn_store.py
-├── .env.example
-├── .gitignore
-├── main.py
-├── requirements.txt
-├── LICENSE
-└── README.md
+├── cogs/                # Módulos de comandos (Cogs)
+│   ├── leveling.py      # Sistema de XP e Ranking
+│   ├── moderation.py    # Moderação e AutoMod
+│   ├── nekosia.py       # Integração com API de imagens
+│   ├── utility.py       # Comandos gerais
+│   └── welcome.py       # Sistema de boas-vindas
+├── logs/                # Arquivos de log do sistema
+├── main.py              # Ponto de entrada do bot
+├── warn_store.py        # Core de persistência e lógica de avisos
+├── requirements.txt     # Dependências do projeto
+└── .env                 # Configurações sensíveis
 ```
 
-## Permissões recomendadas do bot
-Para os comandos de moderação funcionarem corretamente, conceda ao bot:
-- Manage Messages
-- Read Message History
-- Manage Channels
-- Manage Guild
-- Kick Members
-- Ban Members
-- Moderate Members
-- View Channel + Send Messages (nos canais de log)
+---
 
-## Intents
-- O bot so requisita intents privilegiados quando as variaveis abaixo estao como `true` no `.env`:
-  - `ENABLE_MESSAGE_CONTENT_INTENT=true` para recursos que dependem do conteudo de mensagem (AutoMod/leveling).
-  - `ENABLE_MEMBERS_INTENT=true` para recursos que dependem da listagem/eventos de membros (welcome em entrada e operacoes em massa).
-- Se ativar qualquer uma dessas flags no `.env`, ative o respectivo intent no Discord Developer Portal para evitar erro de `PrivilegedIntentsRequired`.
+## 🗄️ Persistência & Banco de Dados
 
-## Logs e erros
-- Os logs são gravados no console e em `logs/bot.log` (com rotação automática).
-- Erros comuns de permissão/uso em DM/checks são tratados com resposta amigável.
-- Erros inesperados são registrados com stack trace no log.
+O Ayana Bot utiliza **MySQL** para garantir que nenhuma informação seja perdida em reinicializações. O esquema é criado automaticamente na primeira execução:
 
-## Licença
-Este projeto está sob a licença MIT. Veja o arquivo `LICENSE`.
+- **`guild_settings`**: Armazena configurações individuais por servidor (canais de log, limites de warn, AutoMod).
+- **`warnings`**: Registro de avisos, incluindo data, moderador e motivo.
+- **`infractions`**: Histórico unificado de banimentos, expulsões e timeouts.
+- **`user_levels`**: Controle de XP, nível e data da última mensagem para cada usuário.
+
+---
+
+## ⚙️ Customização Avançada
+
+O bot oferece comandos extensivos de configuração para administradores:
+
+- **Sistema de Avisos**:
+  - `/setwarnpolicy`: Defina o limite de warns para timeout e banimento automático.
+  - `/setwarnexpiration`: Configure em quantos dias um aviso expira.
+- **AutoMod**:
+  - `/setautomod`: Ative/Desative proteção contra spam, links e flood.
+  - `/addbypassrole`: Defina cargos que ignoram as restrições do AutoMod.
+- **Boas-Vindas**:
+  - `/setwelcome`: Customize mensagens usando placeholders como `{user_mention}`, `{guild_name}` e `{member_count}`.
+  - `/welcomesettings`: Ajuste o canal de envio e o uso de auto-roles.
+
+---
+
+## 🎮 Comandos Disponíveis
+
+| Comando | Categoria | Descrição |
+| :--- | :--- | :--- |
+| `/help` | Utilitários | Lista todos os comandos ou detalhes de um específico. |
+| `/rank` | Nível | Mostra seu cartão de nível e XP atual. |
+| `/leaderboard`| Nível | Exibe o ranking de XP do servidor em imagem. |
+| `/kick` | Moderação | Expulsa um membro do servidor. |
+| `/ban` | Moderação | Bane permanentemente um usuário. |
+| `/timeout` | Moderação | Silencia um membro temporariamente. |
+| `/warn` | Moderação | Aplica um aviso formal a um membro. |
+| `/clear` | Moderação | Limpa mensagens do canal atual. |
+| `/nekosia` | Imagens | Busca imagens variadas da API NekoSia. |
+| `/serverinfo` | Utilitários | Exibe informações técnicas do servidor. |
+
+> *Para uma lista completa e detalhada, utilize `/help` dentro do Discord.*
+
+---
+
+## 🔐 Permissões Recomendadas
+
+Para o pleno funcionamento de todos os sistemas, o bot necessita das seguintes permissões:
+- `Manage Messages`, `Moderate Members`, `Kick Members`, `Ban Members`.
+- `Manage Channels` (para logs), `View Audit Log`.
+- `Embed Links`, `Attach Files`, `Read Message History`.
+
+---
+
+## 📝 Licença
+
+Este projeto está sob a licença **MIT**. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+
+---
+<p align="center">Desenvolvido com ❤️ por @Kaikybrofc</p>
