@@ -27,8 +27,8 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 ### 🎵 Sistema de Música
 - **Player em Canal de Voz**: Comandos slash para conectar, tocar, pausar, retomar e sair do canal.
 - **Fila por Servidor**: Gerenciamento de músicas em memória com skip, stop e visualização da queue.
-- **Busca Integrada**: Aceita URL direta e termo de busca via `yt-dlp`.
-- **Diagnóstico Rápido**: `/music setup` valida FFmpeg + stack de voz (`PyNaCl`/`davey`) + yt-dlp no ambiente.
+- **Busca + Stream Imediato**: Integração com API externa [`yt-dls`](https://github.com/kaikybrofc/yt-dls) (`/search`, `/resolve`, `/stream`, `/prefetch`).
+- **Diagnóstico Rápido**: `/music setup` valida FFmpeg + stack de voz (`PyNaCl`/`davey`) + API de música.
 
 ### 🖼️ Integração NekoSia
 - **Busca de Imagens**: Acesso à API NekoSia com filtros por categoria, tags e animes.
@@ -47,7 +47,7 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 - **Framework**: [Discord.py 2.4](https://discordpy.readthedocs.io/)
 - **Banco de Dados**: [MySQL](https://www.mysql.com/) / [aiomysql](https://github.com/aio-libs/aiomysql)
 - **Processamento de Imagem**: [Pillow](https://python-pillow.org/) & [Pilmoji](https://github.com/dtimofeev/pilmoji)
-- **Audio/Streaming**: `discord.py[voice]` (`PyNaCl` + `davey`), `yt-dlp`, `FFmpeg` (binário do sistema).
+- **Audio/Streaming**: `discord.py[voice]` (`PyNaCl` + `davey`), API [`yt-dls`](https://github.com/kaikybrofc/yt-dls), `FFmpeg` (binário do sistema).
 - **Outros**: `aiohttp`, `python-dotenv`, `regex`.
 
 ---
@@ -57,6 +57,7 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 - Python 3.10 ou superior.
 - Instância do MySQL 8.0+.
 - Token do bot no [Discord Developer Portal](https://discord.com/developers/applications).
+- API de música [`yt-dls`](https://github.com/kaikybrofc/yt-dls) instalada e em execução.
 - FFmpeg instalado no sistema (`ffmpeg` no PATH) para comandos de música.
 
 ---
@@ -92,7 +93,20 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
    pip install -r requirements-dev.txt
    ```
 
-4. **Configure as variáveis de ambiente:**
+4. **Instale e inicie a API de música (`yt-dls`):**
+   Use o repositório oficial:  
+   **https://github.com/kaikybrofc/yt-dls**
+
+   Exemplo rápido:
+   ```bash
+   git clone https://github.com/kaikybrofc/yt-dls.git
+   cd yt-dls
+   # siga o README do projeto para instalar dependencias e iniciar a API
+   ```
+
+   > O Ayana espera a API em `http://127.0.0.1:3013` por padrão.
+
+5. **Configure as variáveis de ambiente:**
    Copie o arquivo `.env.example` para `.env` e preencha os campos:
    ```bash
    cp .env.example .env
@@ -114,7 +128,7 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
    ENABLE_MEMBERS_INTENT=true
    ENABLE_MESSAGE_CONTENT_INTENT=true
 
-   # Musica (opcional, padrao: ffmpeg)
+   # Musica (requer API yt-dls + FFmpeg)
    FFMPEG_BINARY=ffmpeg
    YTDLS_API_BASE_URL=http://127.0.0.1:3013
    ```
