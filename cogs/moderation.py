@@ -61,6 +61,34 @@ class ModerationCog(commands.Cog):
         return timedelta(seconds=amount * multipliers[unit])
 
     @staticmethod
+    def _parse_slowmode_delay(raw_value: str) -> int | None:
+        compact = raw_value.strip().lower().replace(" ", "")
+        if compact in {"off", "0", "desligar", "desativar"}:
+            return 0
+
+        if compact.isdigit():
+            seconds = int(compact)
+            if 0 <= seconds <= 21_600:
+                return seconds
+            return None
+
+        match = re.fullmatch(r"(\d+)([smh])", compact)
+        if match is None:
+            return None
+
+        amount = int(match.group(1))
+        unit = match.group(2)
+        multipliers = {
+            "s": 1,
+            "m": 60,
+            "h": 60 * 60,
+        }
+        seconds = amount * multipliers[unit]
+        if 0 <= seconds <= 21_600:
+            return seconds
+        return None
+
+    @staticmethod
     def _choice_label(text: str, max_length: int = 100) -> str:
         if len(text) <= max_length:
             return text
@@ -171,6 +199,22 @@ class ModerationCog(commands.Cog):
         if rem_hours:
             return f"{days}d {rem_hours}h"
         return f"{days}d"
+
+    @staticmethod
+    def _format_slowmode_delay(total_seconds: int) -> str:
+        if total_seconds <= 0:
+            return "desligado"
+
+        hours, remainder = divmod(total_seconds, 60 * 60)
+        minutes, seconds = divmod(remainder, 60)
+        parts: list[str] = []
+        if hours:
+            parts.append(f"{hours}h")
+        if minutes:
+            parts.append(f"{minutes}m")
+        if seconds or not parts:
+            parts.append(f"{seconds}s")
+        return " ".join(parts)
 
     def _warn_store(self):
         warn_store = getattr(self.bot, "warn_store", None)
@@ -555,6 +599,79 @@ class ModerationCog(commands.Cog):
         deleted = await channel.purge(limit=amount, reason=reason)
         await interaction.followup.send(
             f"{len(deleted)} mensagens apagadas.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="slowmode", description="Ajusta o modo lento de um canal de texto.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_channels=True)
+    @app_commands.checks.has_permissions(manage_channels=True)
+    @app_commands.checks.bot_has_permissions(manage_channels=True)
+    @app_commands.describe(
+        tempo="Tempo: 0/off, segundos (30) ou com sufixo (10s, 2m, 1h). Maximo 6h.",
+        canal="Canal para aplicar. Se vazio, usa o canal atual.",
+    )
+    async def slowmode(
+        self,
+        interaction: discord.Interaction,
+        tempo: str,
+        canal: discord.TextChannel | None = None,
+    ) -> None:
+        guild = interaction.guild
+        actor = interaction.user
+        if guild is None or not isinstance(actor, discord.Member):
+            await interaction.response.send_message(
+                "Este comando so funciona em servidor.",
+                ephemeral=True,
+            )
+            return
+
+        delay_seconds = self._parse_slowmode_delay(tempo)
+        if delay_seconds is None:
+            await interaction.response.send_message(
+                (
+                    "Tempo invalido. Use `0`/`off` para desligar, segundos (`30`) "
+                    "ou `s/m/h` (`10s`, `2m`, `1h`). Limite maximo: `6h`."
+                ),
+                ephemeral=True,
+            )
+            return
+
+        target_channel = canal
+        if target_channel is None:
+            current_channel = interaction.channel
+            if not isinstance(current_channel, discord.TextChannel):
+                await interaction.response.send_message(
+                    "Informe um canal de texto em `canal` para usar este comando aqui.",
+                    ephemeral=True,
+                )
+                return
+            target_channel = current_channel
+
+        reason = (
+            f"Slowmode ajustado para {delay_seconds}s em {target_channel.name} "
+            f"por {actor} ({actor.id})"
+        )
+        try:
+            await target_channel.edit(slowmode_delay=delay_seconds, reason=reason)
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "Nao tenho permissao para ajustar o modo lento nesse canal.",
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException:
+            await interaction.response.send_message(
+                "Falha ao atualizar o modo lento. Tente novamente.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            (
+                f"Modo lento de {target_channel.mention} atualizado para "
+                f"`{self._format_slowmode_delay(delay_seconds)}` (`{delay_seconds}s`)."
+            ),
             ephemeral=True,
         )
 

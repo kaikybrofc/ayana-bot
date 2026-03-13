@@ -77,6 +77,13 @@ COMMAND_DETAILS: dict[str, dict[str, str]] = {
         "escopo": "Apenas servidor",
         "detalhes": "Apaga de 1 a 100 mensagens no canal atual.",
     },
+    "slowmode": {
+        "categoria": "Moderacao",
+        "uso": "/slowmode <tempo> [canal]",
+        "permissoes": "Manage Channels",
+        "escopo": "Apenas servidor",
+        "detalhes": "Ajusta o cooldown de mensagens de um canal especifico ou do canal atual.",
+    },
     "kick": {
         "categoria": "Moderacao",
         "uso": "/kick <member> [reason]",
