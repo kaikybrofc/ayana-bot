@@ -24,6 +24,12 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 - **Leaderboard Visual**: Ranking do servidor renderizado em imagem de alta qualidade.
 - **Persistência de Dados**: Progresso salvo de forma robusta no banco de dados.
 
+### 🎵 Sistema de Música
+- **Player em Canal de Voz**: Comandos slash para conectar, tocar, pausar, retomar e sair do canal.
+- **Fila por Servidor**: Gerenciamento de músicas em memória com skip, stop e visualização da queue.
+- **Busca Integrada**: Aceita URL direta e termo de busca via `yt-dlp`.
+- **Diagnóstico Rápido**: `/music setup` valida FFmpeg + stack de voz (`PyNaCl`/`davey`) + yt-dlp no ambiente.
+
 ### 🖼️ Integração NekoSia
 - **Busca de Imagens**: Acesso à API NekoSia com filtros por categoria, tags e animes.
 - **Filtro de Conteúdo**: Sistema inteligente que alterna entre `safe` e `suggestive` dependendo do canal (NSFW check).
@@ -41,6 +47,7 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 - **Framework**: [Discord.py 2.4](https://discordpy.readthedocs.io/)
 - **Banco de Dados**: [MySQL](https://www.mysql.com/) / [aiomysql](https://github.com/aio-libs/aiomysql)
 - **Processamento de Imagem**: [Pillow](https://python-pillow.org/) & [Pilmoji](https://github.com/dtimofeev/pilmoji)
+- **Audio/Streaming**: `discord.py[voice]` (`PyNaCl` + `davey`), `yt-dlp`, `FFmpeg` (binário do sistema).
 - **Outros**: `aiohttp`, `python-dotenv`, `regex`.
 
 ---
@@ -50,6 +57,7 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 - Python 3.10 ou superior.
 - Instância do MySQL 8.0+.
 - Token do bot no [Discord Developer Portal](https://discord.com/developers/applications).
+- FFmpeg instalado no sistema (`ffmpeg` no PATH) para comandos de música.
 
 ---
 
@@ -72,6 +80,11 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 3. **Instale as dependências:**
    ```bash
    pip install -r requirements.txt
+   ```
+
+   **(Opcional - recursos de música no Linux/Debian)** Garanta o FFmpeg:
+   ```bash
+   sudo apt-get update && sudo apt-get install -y ffmpeg
    ```
 
    **(Opcional - desenvolvimento)** Instale formatador e lint:
@@ -100,6 +113,10 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
    # Intents (Ative no Portal do Desenvolvedor)
    ENABLE_MEMBERS_INTENT=true
    ENABLE_MESSAGE_CONTENT_INTENT=true
+
+   # Musica (opcional, padrao: ffmpeg)
+   FFMPEG_BINARY=ffmpeg
+   YTDLS_API_BASE_URL=http://127.0.0.1:3013
    ```
 
 ---
@@ -132,6 +149,7 @@ As configurações ficam em `pyproject.toml`.
 ayana-bot/
 ├── cogs/                # Módulos de comandos (Cogs)
 │   ├── leveling.py      # Sistema de XP e Ranking
+│   ├── music.py         # Reprodução de áudio em canal de voz
 │   ├── moderation.py    # Moderação e AutoMod
 │   ├── nekosia.py       # Integração com API de imagens
 │   ├── utility.py       # Comandos gerais
@@ -181,6 +199,13 @@ O bot oferece comandos extensivos de configuração para administradores:
 | `/help` | Utilitários | Lista todos os comandos ou detalhes de um específico. |
 | `/rank` | Nível | Mostra seu cartão de nível e XP atual. |
 | `/leaderboard`| Nível | Exibe o ranking de XP do servidor em imagem. |
+| `/music play` | Música | Busca/toca música e adiciona na fila do servidor. |
+| `/music queue` | Música | Mostra música atual e próximas faixas da fila. |
+| `/music pause` | Música | Pausa a música atual (mesmo canal de voz do bot). |
+| `/music resume` | Música | Retoma a reprodução pausada. |
+| `/music skip` | Música | Pula para a próxima faixa da fila. |
+| `/music stop` | Música | Para a reprodução e limpa toda a fila. |
+| `/music leave` | Música | Desconecta do canal de voz e limpa a fila. |
 | `/kick` | Moderação | Expulsa um membro do servidor. |
 | `/ban` | Moderação | Bane permanentemente um usuário. |
 | `/timeout` | Moderação | Silencia um membro temporariamente. |
@@ -202,6 +227,7 @@ Para o pleno funcionamento de todos os sistemas, o bot necessita das seguintes p
 - `Manage Messages`, `Moderate Members`, `Kick Members`, `Ban Members`.
 - `Manage Channels` (para logs), `View Audit Log`.
 - `Embed Links`, `Attach Files`, `Read Message History`.
+- `Connect`, `Speak` e `Use Voice Activity` para comandos de música em voz.
 
 ---
 

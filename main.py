@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from warn_store import MySQLConfig, WarnStore
 
 LOGGER = logging.getLogger("ayana")
-EXTENSIONS = ("cogs.utility", "cogs.leveling", "cogs.moderation", "cogs.welcome", "cogs.nekosia")
+EXTENSIONS = ("cogs.utility", "cogs.leveling", "cogs.music", "cogs.moderation", "cogs.welcome", "cogs.nekosia")
 
 
 def sanitize_env_value(raw_value: str | None) -> str | None:

@@ -71,6 +71,83 @@ COMMAND_DETAILS: dict[str, dict[str, str]] = {
         "escopo": "Apenas servidor",
         "detalhes": "Gera um canvas com o ranking de niveis do servidor por XP.",
     },
+    "music setup": {
+        "categoria": "Musica",
+        "uso": "/music setup",
+        "permissoes": "Nenhuma",
+        "escopo": "Servidor e DM",
+        "detalhes": "Diagnostica dependencias de audio: FFmpeg, yt-dlp, API externa, PyNaCl e Davey.",
+    },
+    "music join": {
+        "categoria": "Musica",
+        "uso": "/music join",
+        "permissoes": "Connect + Speak (bot)",
+        "escopo": "Apenas servidor",
+        "detalhes": "Conecta o bot no seu canal de voz atual.",
+    },
+    "music play": {
+        "categoria": "Musica",
+        "uso": "/music play <busca_ou_url>",
+        "permissoes": "Connect + Speak (bot)",
+        "escopo": "Apenas servidor",
+        "detalhes": "Busca uma musica (ou usa URL direta) e adiciona na fila.",
+    },
+    "music queue": {
+        "categoria": "Musica",
+        "uso": "/music queue [limite]",
+        "permissoes": "Nenhuma",
+        "escopo": "Apenas servidor",
+        "detalhes": "Mostra a fila atual e as proximas faixas.",
+    },
+    "music now": {
+        "categoria": "Musica",
+        "uso": "/music now",
+        "permissoes": "Nenhuma",
+        "escopo": "Apenas servidor",
+        "detalhes": "Mostra a faixa que esta tocando no momento.",
+    },
+    "music pause": {
+        "categoria": "Musica",
+        "uso": "/music pause",
+        "permissoes": "Estar no mesmo canal de voz do bot",
+        "escopo": "Apenas servidor",
+        "detalhes": "Pausa a reproducao atual.",
+    },
+    "music resume": {
+        "categoria": "Musica",
+        "uso": "/music resume",
+        "permissoes": "Estar no mesmo canal de voz do bot",
+        "escopo": "Apenas servidor",
+        "detalhes": "Retoma uma faixa pausada.",
+    },
+    "music skip": {
+        "categoria": "Musica",
+        "uso": "/music skip",
+        "permissoes": "Estar no mesmo canal de voz do bot",
+        "escopo": "Apenas servidor",
+        "detalhes": "Pula para a proxima faixa da fila.",
+    },
+    "music stop": {
+        "categoria": "Musica",
+        "uso": "/music stop",
+        "permissoes": "Estar no mesmo canal de voz do bot",
+        "escopo": "Apenas servidor",
+        "detalhes": "Para a musica atual e limpa toda a fila.",
+    },
+    "music leave": {
+        "categoria": "Musica",
+        "uso": "/music leave",
+        "permissoes": "Estar no mesmo canal de voz do bot",
+        "escopo": "Apenas servidor",
+        "detalhes": "Desconecta o bot do canal e limpa a fila.",
+    },
+    "music volume": {
+        "categoria": "Musica",
+        "uso": "/music volume <valor>",
+        "permissoes": "Estar no mesmo canal de voz do bot",
+        "escopo": "Apenas servidor",
+        "detalhes": "Ajusta o volume de 0% a 200%.",
+    },
     "nekosia": {
         "categoria": "Imagens",
         "uso": "/nekosia [category] [count] [additional_tags] [blacklisted_tags] [rating]",
@@ -227,7 +304,7 @@ COMMAND_DETAILS: dict[str, dict[str, str]] = {
     },
 }
 
-CATEGORY_ORDER = ("Utilitarios", "Imagens", "Moderacao", "Outros")
+CATEGORY_ORDER = ("Utilitarios", "Musica", "Imagens", "Moderacao", "Outros")
 
 
 def ts(dt: datetime | None) -> str:
