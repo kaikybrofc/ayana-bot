@@ -84,6 +84,13 @@ COMMAND_DETAILS: dict[str, dict[str, str]] = {
         "escopo": "Apenas servidor",
         "detalhes": "Ajusta o cooldown de mensagens de um canal especifico ou do canal atual.",
     },
+    "lockdown": {
+        "categoria": "Moderacao",
+        "uso": "/lockdown [canal] [motivo]",
+        "permissoes": "Manage Channels",
+        "escopo": "Apenas servidor",
+        "detalhes": "Tranca o canal removendo a permissao de envio de mensagens para @everyone.",
+    },
     "kick": {
         "categoria": "Moderacao",
         "uso": "/kick <member> [reason]",

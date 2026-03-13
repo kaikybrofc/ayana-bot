@@ -675,6 +675,91 @@ class ModerationCog(commands.Cog):
             ephemeral=True,
         )
 
+    @app_commands.command(name="lockdown", description="Tranca um canal removendo envio de mensagens do @everyone.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_channels=True)
+    @app_commands.checks.has_permissions(manage_channels=True)
+    @app_commands.checks.bot_has_permissions(manage_channels=True)
+    @app_commands.describe(
+        canal="Canal para trancar. Se vazio, usa o canal atual.",
+        motivo="Motivo do lockdown.",
+    )
+    async def lockdown(
+        self,
+        interaction: discord.Interaction,
+        canal: discord.TextChannel | None = None,
+        motivo: str | None = None,
+    ) -> None:
+        guild = interaction.guild
+        actor = interaction.user
+        if guild is None or not isinstance(actor, discord.Member):
+            await interaction.response.send_message(
+                "Este comando so funciona em servidor.",
+                ephemeral=True,
+            )
+            return
+
+        target_channel = canal
+        if target_channel is None:
+            current_channel = interaction.channel
+            if not isinstance(current_channel, discord.TextChannel):
+                await interaction.response.send_message(
+                    "Informe um canal de texto em `canal` para usar este comando aqui.",
+                    ephemeral=True,
+                )
+                return
+            target_channel = current_channel
+
+        clean_reason = motivo.strip() if motivo else "Sem motivo informado."
+        audit_reason = self._build_reason(actor, f"Lockdown no canal #{target_channel.name}. {clean_reason}")
+
+        everyone_role = guild.default_role
+        overwrite = target_channel.overwrites_for(everyone_role)
+        overwrite.send_messages = False
+
+        try:
+            await target_channel.set_permissions(everyone_role, overwrite=overwrite, reason=audit_reason)
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "Nao tenho permissao para trancar esse canal.",
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException:
+            await interaction.response.send_message(
+                "Falha ao aplicar o lockdown no canal. Tente novamente.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            settings = await self._get_guild_settings(guild.id)
+            await self._send_modlog(
+                guild=guild,
+                settings=settings,
+                title="Lockdown aplicado",
+                description=(
+                    f"Canal: {target_channel.mention}\n"
+                    f"Moderador: {actor.mention}\n"
+                    f"Permissao alterada: `@everyone -> Send Messages = False`\n"
+                    f"Motivo: {clean_reason}"
+                ),
+                color=discord.Color.dark_red(),
+            )
+        except Exception as exc:
+            LOGGER.error(
+                "Falha ao registrar mod-log de lockdown.",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+
+        await interaction.response.send_message(
+            (
+                f"Lockdown aplicado em {target_channel.mention}. "
+                "O cargo `@everyone` nao pode mais enviar mensagens neste canal."
+            ),
+            ephemeral=True,
+        )
+
     @app_commands.command(name="kick", description="Expulsa um membro do servidor.")
     @app_commands.guild_only()
     @app_commands.default_permissions(kick_members=True)

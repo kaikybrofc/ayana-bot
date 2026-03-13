@@ -158,6 +158,7 @@ O bot oferece comandos extensivos de configuração para administradores:
 | `/warn` | Moderação | Aplica um aviso formal a um membro. |
 | `/clear` | Moderação | Limpa mensagens do canal atual. |
 | `/slowmode` | Moderação | Ajusta o cooldown de mensagens de um canal. |
+| `/lockdown` | Moderação | Tranca o canal removendo envio de mensagens do @everyone. |
 | `/nekosia` | Imagens | Busca imagens variadas da API NekoSia. |
 | `/serverinfo` | Utilitários | Exibe informações técnicas do servidor. |
 
