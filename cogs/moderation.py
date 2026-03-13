@@ -580,6 +580,12 @@ class ModerationCog(commands.Cog):
             return
 
         channel = interaction.channel
+        if isinstance(channel, discord.ForumChannel):
+            await interaction.response.send_message(
+                "Use este comando dentro de uma thread/post do forum, nao no canal de forum.",
+                ephemeral=True,
+            )
+            return
         if channel is None or not hasattr(channel, "purge"):
             await interaction.response.send_message(
                 "Este comando so pode ser usado em canais de texto.",
@@ -595,20 +601,27 @@ class ModerationCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="slowmode", description="Ajusta o modo lento de um canal de texto.")
+    @app_commands.command(name="slowmode", description="Ajusta o modo lento de canal de texto, thread ou forum.")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_channels=True)
     @app_commands.checks.has_permissions(manage_channels=True)
     @app_commands.checks.bot_has_permissions(manage_channels=True)
     @app_commands.describe(
         tempo="Tempo: 0/off, segundos (30) ou com sufixo (10s, 2m, 1h). Maximo 6h.",
-        canal="Canal para aplicar. Se vazio, usa o canal atual.",
+        canal="Canal alvo. Aceita texto/thread/forum. Se vazio, usa o canal atual.",
     )
     async def slowmode(
         self,
         interaction: discord.Interaction,
         tempo: str,
-        canal: discord.TextChannel | None = None,
+        canal: (
+            discord.TextChannel
+            | discord.Thread
+            | discord.ForumChannel
+            | discord.StageChannel
+            | discord.VoiceChannel
+            | None
+        ) = None,
     ) -> None:
         guild = interaction.guild
         actor = interaction.user
@@ -630,20 +643,37 @@ class ModerationCog(commands.Cog):
             )
             return
 
-        target_channel = canal
+        target_channel = canal or interaction.channel
         if target_channel is None:
-            current_channel = interaction.channel
-            if not isinstance(current_channel, discord.TextChannel):
-                await interaction.response.send_message(
-                    "Informe um canal de texto em `canal` para usar este comando aqui.",
-                    ephemeral=True,
-                )
-                return
-            target_channel = current_channel
+            await interaction.response.send_message(
+                "Nao consegui identificar o canal alvo para aplicar slowmode.",
+                ephemeral=True,
+            )
+            return
 
-        reason = f"Slowmode ajustado para {delay_seconds}s em {target_channel.name} " f"por {actor} ({actor.id})"
+        if isinstance(target_channel, (discord.StageChannel, discord.VoiceChannel)):
+            await interaction.response.send_message(
+                ("Canal de voz/palco nao suporta slowmode de mensagens. " "Use um canal de texto, forum ou thread."),
+                ephemeral=True,
+            )
+            return
+
+        if not isinstance(target_channel, (discord.TextChannel, discord.Thread, discord.ForumChannel)):
+            await interaction.response.send_message(
+                "Este canal nao suporta slowmode.",
+                ephemeral=True,
+            )
+            return
+
+        reason = f"Slowmode ajustado para {delay_seconds}s em {target_channel.name} por {actor} ({actor.id})"
         try:
             await target_channel.edit(slowmode_delay=delay_seconds, reason=reason)
+        except TypeError:
+            await interaction.response.send_message(
+                "Este tipo de canal nao aceita configuracao de slowmode.",
+                ephemeral=True,
+            )
+            return
         except discord.Forbidden:
             await interaction.response.send_message(
                 "Nao tenho permissao para ajustar o modo lento nesse canal.",
@@ -665,19 +695,29 @@ class ModerationCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="lockdown", description="Tranca um canal removendo envio de mensagens do @everyone.")
+    @app_commands.command(
+        name="lockdown",
+        description="Tranca canal de texto/forum ou bloqueia uma thread rapidamente.",
+    )
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_channels=True)
     @app_commands.checks.has_permissions(manage_channels=True)
     @app_commands.checks.bot_has_permissions(manage_channels=True)
     @app_commands.describe(
-        canal="Canal para trancar. Se vazio, usa o canal atual.",
+        canal="Canal para trancar (texto/forum/voice/stage) ou thread. Se vazio, usa o canal atual.",
         motivo="Motivo do lockdown.",
     )
     async def lockdown(
         self,
         interaction: discord.Interaction,
-        canal: discord.TextChannel | None = None,
+        canal: (
+            discord.TextChannel
+            | discord.Thread
+            | discord.ForumChannel
+            | discord.StageChannel
+            | discord.VoiceChannel
+            | None
+        ) = None,
         motivo: str | None = None,
     ) -> None:
         guild = interaction.guild
@@ -689,38 +729,84 @@ class ModerationCog(commands.Cog):
             )
             return
 
-        target_channel = canal
+        target_channel = canal or interaction.channel
         if target_channel is None:
-            current_channel = interaction.channel
-            if not isinstance(current_channel, discord.TextChannel):
+            await interaction.response.send_message(
+                "Nao consegui identificar o canal alvo para o lockdown.",
+                ephemeral=True,
+            )
+            return
+
+        if not isinstance(
+            target_channel,
+            (discord.TextChannel, discord.Thread, discord.ForumChannel, discord.StageChannel, discord.VoiceChannel),
+        ):
+            await interaction.response.send_message(
+                "Esse tipo de canal nao e suportado pelo /lockdown.",
+                ephemeral=True,
+            )
+            return
+
+        clean_reason = motivo.strip() if motivo else "Sem motivo informado."
+        everyone_role = guild.default_role
+
+        modlog_permission_line = ""
+        success_message = ""
+
+        if isinstance(target_channel, discord.Thread):
+            audit_reason = self._build_reason(actor, f"Lockdown da thread #{target_channel.name}. {clean_reason}")
+            try:
+                await target_channel.edit(archived=True, locked=True, reason=audit_reason)
+            except discord.Forbidden:
                 await interaction.response.send_message(
-                    "Informe um canal de texto em `canal` para usar este comando aqui.",
+                    "Nao tenho permissao para bloquear essa thread.",
                     ephemeral=True,
                 )
                 return
-            target_channel = current_channel
+            except discord.HTTPException:
+                await interaction.response.send_message(
+                    "Falha ao aplicar lockdown na thread. Tente novamente.",
+                    ephemeral=True,
+                )
+                return
 
-        clean_reason = motivo.strip() if motivo else "Sem motivo informado."
-        audit_reason = self._build_reason(actor, f"Lockdown no canal #{target_channel.name}. {clean_reason}")
+            modlog_permission_line = "Acao: `Thread arquivada e bloqueada`"
+            success_message = f"Lockdown aplicado em {target_channel.mention}. " "A thread foi arquivada e bloqueada."
+        else:
+            audit_reason = self._build_reason(actor, f"Lockdown no canal #{target_channel.name}. {clean_reason}")
+            overwrite = target_channel.overwrites_for(everyone_role)
+            overwrite.send_messages = False
+            if isinstance(target_channel, (discord.TextChannel, discord.ForumChannel)):
+                overwrite.send_messages_in_threads = False
 
-        everyone_role = guild.default_role
-        overwrite = target_channel.overwrites_for(everyone_role)
-        overwrite.send_messages = False
+            try:
+                await target_channel.set_permissions(everyone_role, overwrite=overwrite, reason=audit_reason)
+            except TypeError:
+                await interaction.response.send_message(
+                    "Esse tipo de canal nao aceita esse tipo de lockdown.",
+                    ephemeral=True,
+                )
+                return
+            except discord.Forbidden:
+                await interaction.response.send_message(
+                    "Nao tenho permissao para trancar esse canal.",
+                    ephemeral=True,
+                )
+                return
+            except discord.HTTPException:
+                await interaction.response.send_message(
+                    "Falha ao aplicar o lockdown no canal. Tente novamente.",
+                    ephemeral=True,
+                )
+                return
 
-        try:
-            await target_channel.set_permissions(everyone_role, overwrite=overwrite, reason=audit_reason)
-        except discord.Forbidden:
-            await interaction.response.send_message(
-                "Nao tenho permissao para trancar esse canal.",
-                ephemeral=True,
+            modlog_permission_line = "Permissao alterada: `@everyone -> Send Messages = False`"
+            if isinstance(target_channel, (discord.TextChannel, discord.ForumChannel)):
+                modlog_permission_line += "\nPermissao alterada: `@everyone -> Send Messages In Threads = False`"
+            success_message = (
+                f"Lockdown aplicado em {target_channel.mention}. "
+                "O cargo `@everyone` nao pode mais enviar mensagens neste canal."
             )
-            return
-        except discord.HTTPException:
-            await interaction.response.send_message(
-                "Falha ao aplicar o lockdown no canal. Tente novamente.",
-                ephemeral=True,
-            )
-            return
 
         try:
             settings = await self._get_guild_settings(guild.id)
@@ -731,7 +817,7 @@ class ModerationCog(commands.Cog):
                 description=(
                     f"Canal: {target_channel.mention}\n"
                     f"Moderador: {actor.mention}\n"
-                    f"Permissao alterada: `@everyone -> Send Messages = False`\n"
+                    f"{modlog_permission_line}\n"
                     f"Motivo: {clean_reason}"
                 ),
                 color=discord.Color.dark_red(),
@@ -743,10 +829,7 @@ class ModerationCog(commands.Cog):
             )
 
         await interaction.response.send_message(
-            (
-                f"Lockdown aplicado em {target_channel.mention}. "
-                "O cargo `@everyone` nao pode mais enviar mensagens neste canal."
-            ),
+            success_message,
             ephemeral=True,
         )
 

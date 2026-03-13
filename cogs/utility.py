@@ -82,14 +82,14 @@ COMMAND_DETAILS: dict[str, dict[str, str]] = {
         "uso": "/slowmode <tempo> [canal]",
         "permissoes": "Manage Channels",
         "escopo": "Apenas servidor",
-        "detalhes": "Ajusta o cooldown de mensagens de um canal especifico ou do canal atual.",
+        "detalhes": "Ajusta o cooldown em canal de texto, thread ou forum.",
     },
     "lockdown": {
         "categoria": "Moderacao",
         "uso": "/lockdown [canal] [motivo]",
         "permissoes": "Manage Channels",
         "escopo": "Apenas servidor",
-        "detalhes": "Tranca o canal removendo a permissao de envio de mensagens para @everyone.",
+        "detalhes": "Tranca canal (texto/forum/voice/stage) e bloqueia thread com modo de emergencia.",
     },
     "nick": {
         "categoria": "Moderacao",
