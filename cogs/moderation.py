@@ -351,10 +351,7 @@ class ModerationCog(commands.Cog):
             if not self._can_bot_moderate_member(guild, member):
                 return "Escalonamento para ban acionado, mas sem hierarquia suficiente."
 
-            reason = (
-                f"Escalonamento automatico: {active_warnings} warns ativos "
-                f"(limite de ban: {ban_threshold})."
-            )
+            reason = f"Escalonamento automatico: {active_warnings} warns ativos " f"(limite de ban: {ban_threshold})."
             try:
                 await member.ban(reason=reason, delete_message_days=0)
             except (discord.Forbidden, discord.HTTPException):
@@ -395,10 +392,7 @@ class ModerationCog(commands.Cog):
                 reason=reason,
                 expires_at=timed_out_until,
             )
-            return (
-                "Timeout automatico aplicado por escalonamento "
-                f"({self._format_minutes(duration_minutes)})."
-            )
+            return "Timeout automatico aplicado por escalonamento " f"({self._format_minutes(duration_minutes)})."
 
         return None
 
@@ -541,8 +535,7 @@ class ModerationCog(commands.Cog):
         escalation = warning_result["escalation"]
         if self._should_send_automod_notice(guild.id, member.id):
             short_notice = (
-                f"AutoMod: mensagem de `{member.display_name}` removida e warn registrado "
-                f"(#{warning_id})."
+                f"AutoMod: mensagem de `{member.display_name}` removida e warn registrado " f"(#{warning_id})."
             )
             try:
                 await message.channel.send(
@@ -648,10 +641,7 @@ class ModerationCog(commands.Cog):
                 return
             target_channel = current_channel
 
-        reason = (
-            f"Slowmode ajustado para {delay_seconds}s em {target_channel.name} "
-            f"por {actor} ({actor.id})"
-        )
+        reason = f"Slowmode ajustado para {delay_seconds}s em {target_channel.name} " f"por {actor} ({actor.id})"
         try:
             await target_channel.edit(slowmode_delay=delay_seconds, reason=reason)
         except discord.Forbidden:
@@ -1339,9 +1329,7 @@ class ModerationCog(commands.Cog):
                 expiry = " | Expira: nunca"
 
             entry = (
-                f"{header}\n"
-                f"Status: `{status}`{expiry}\n"
-                f"Motivo: {self._choice_label(reason, max_length=220)}"
+                f"{header}\n" f"Status: `{status}`{expiry}\n" f"Motivo: {self._choice_label(reason, max_length=220)}"
             )
             entries.append(entry)
 
@@ -1676,12 +1664,7 @@ class ModerationCog(commands.Cog):
             )
             return
 
-        if (
-            timeout_warns is None
-            and ban_warns is None
-            and expiration_days is None
-            and timeout_duration_minutes is None
-        ):
+        if timeout_warns is None and ban_warns is None and expiration_days is None and timeout_duration_minutes is None:
             await interaction.response.send_message(
                 "Informe pelo menos um campo para atualizar.",
                 ephemeral=True,
@@ -1908,8 +1891,7 @@ class ModerationCog(commands.Cog):
         note = ""
         if not used_api_listing:
             note = (
-                "\\nObs: usei apenas membros em cache. "
-                "Ative `SERVER MEMBERS INTENT` para garantir cobertura total."
+                "\\nObs: usei apenas membros em cache. " "Ative `SERVER MEMBERS INTENT` para garantir cobertura total."
             )
 
         await interaction.followup.send(

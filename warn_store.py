@@ -26,14 +26,10 @@ DEFAULT_GUILD_SETTINGS = {
     "automod_bypass_role_ids": [],
     "welcome_enabled": False,
     "welcome_channel_id": None,
-    "welcome_message": (
-        "Bem-vindo {user_mention} ao **{guild_name}**! "
-        "Agora somos **{member_count}** membros."
-    ),
+    "welcome_message": ("Bem-vindo {user_mention} ao **{guild_name}**! " "Agora somos **{member_count}** membros."),
     "welcome_dm_enabled": False,
     "welcome_dm_message": (
-        "Ola {user_name}, bem-vindo(a) ao {guild_name}! "
-        "Leia as regras e aproveite a comunidade."
+        "Ola {user_name}, bem-vindo(a) ao {guild_name}! " "Leia as regras e aproveite a comunidade."
     ),
     "welcome_auto_role_ids": [],
     "welcome_mention_user": True,
@@ -74,11 +70,7 @@ LEVEL_XP_QUADRATIC_STEP = 5
 def xp_for_next_level(level: int) -> int:
     safe_level = max(0, int(level))
     # Curva progressiva: cada nivel exige mais XP que o anterior.
-    return (
-        LEVEL_XP_BASE
-        + (LEVEL_XP_LINEAR_STEP * safe_level)
-        + (LEVEL_XP_QUADRATIC_STEP * safe_level * safe_level)
-    )
+    return LEVEL_XP_BASE + (LEVEL_XP_LINEAR_STEP * safe_level) + (LEVEL_XP_QUADRATIC_STEP * safe_level * safe_level)
 
 
 def total_xp_for_level(level: int) -> int:
@@ -91,11 +83,7 @@ def total_xp_for_level(level: int) -> int:
     n = safe_level
     linear_sum = (n * (n - 1)) // 2
     quadratic_sum = ((n - 1) * n * ((2 * n) - 1)) // 6
-    return (
-        (LEVEL_XP_BASE * n)
-        + (LEVEL_XP_LINEAR_STEP * linear_sum)
-        + (LEVEL_XP_QUADRATIC_STEP * quadratic_sum)
-    )
+    return (LEVEL_XP_BASE * n) + (LEVEL_XP_LINEAR_STEP * linear_sum) + (LEVEL_XP_QUADRATIC_STEP * quadratic_sum)
 
 
 def level_from_total_xp(total_xp: int) -> int:
@@ -137,9 +125,7 @@ class MySQLConfig:
 
     def validate(self) -> None:
         if not DB_IDENTIFIER_RE.fullmatch(self.database):
-            raise ValueError(
-                "DB_NAME invalido. Use apenas letras, numeros e underscore (_)."
-            )
+            raise ValueError("DB_NAME invalido. Use apenas letras, numeros e underscore (_).")
 
 
 class WarnStore:
@@ -288,9 +274,7 @@ class WarnStore:
         row = await cursor.fetchone()
         if row is not None:
             return
-        await cursor.execute(
-            "ALTER TABLE warnings ADD COLUMN expires_at TIMESTAMP NULL DEFAULT NULL AFTER reason"
-        )
+        await cursor.execute("ALTER TABLE warnings ADD COLUMN expires_at TIMESTAMP NULL DEFAULT NULL AFTER reason")
 
     async def _ensure_guild_settings_columns(self, cursor: aiomysql.Cursor) -> None:
         required_columns = {
@@ -319,8 +303,7 @@ class WarnStore:
                 "AFTER welcome_dm_enabled"
             ),
             "welcome_auto_role_ids": (
-                "ALTER TABLE guild_settings "
-                "ADD COLUMN welcome_auto_role_ids TEXT NULL AFTER welcome_dm_message"
+                "ALTER TABLE guild_settings " "ADD COLUMN welcome_auto_role_ids TEXT NULL AFTER welcome_dm_message"
             ),
             "welcome_mention_user": (
                 "ALTER TABLE guild_settings "
@@ -777,9 +760,7 @@ class WarnStore:
         return {
             "guild_id": int(row["guild_id"]),
             "mod_log_channel_id": int(row["mod_log_channel_id"]) if row["mod_log_channel_id"] else None,
-            "automod_log_channel_id": (
-                int(row["automod_log_channel_id"]) if row["automod_log_channel_id"] else None
-            ),
+            "automod_log_channel_id": (int(row["automod_log_channel_id"]) if row["automod_log_channel_id"] else None),
             "warn_timeout_threshold": int(row["warn_timeout_threshold"]),
             "warn_ban_threshold": int(row["warn_ban_threshold"]),
             "warn_expiration_days": int(row["warn_expiration_days"]),
@@ -793,16 +774,12 @@ class WarnStore:
             "automod_mention_limit": int(row["automod_mention_limit"]),
             "automod_bypass_role_ids": _parse_role_ids(row.get("automod_bypass_role_ids")),
             "welcome_enabled": bool(row.get("welcome_enabled", False)),
-            "welcome_channel_id": (
-                int(row["welcome_channel_id"]) if row.get("welcome_channel_id") else None
-            ),
-            "welcome_message": str(
-                row.get("welcome_message") or DEFAULT_GUILD_SETTINGS["welcome_message"]
-            )[:1500],
+            "welcome_channel_id": (int(row["welcome_channel_id"]) if row.get("welcome_channel_id") else None),
+            "welcome_message": str(row.get("welcome_message") or DEFAULT_GUILD_SETTINGS["welcome_message"])[:1500],
             "welcome_dm_enabled": bool(row.get("welcome_dm_enabled", False)),
-            "welcome_dm_message": str(
-                row.get("welcome_dm_message") or DEFAULT_GUILD_SETTINGS["welcome_dm_message"]
-            )[:1500],
+            "welcome_dm_message": str(row.get("welcome_dm_message") or DEFAULT_GUILD_SETTINGS["welcome_dm_message"])[
+                :1500
+            ],
             "welcome_auto_role_ids": _parse_role_ids(row.get("welcome_auto_role_ids")),
             "welcome_mention_user": bool(row.get("welcome_mention_user", True)),
             "welcome_delete_after_seconds": int(row.get("welcome_delete_after_seconds") or 0),

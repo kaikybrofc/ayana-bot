@@ -112,9 +112,7 @@ def _resolve_image_url(image_payload: dict[str, Any]) -> str | None:
 
 def _is_expected_filter_error(message: str) -> bool:
     normalized = message.strip()
-    return normalized.startswith(NO_RESULTS_MESSAGE_PREFIX) or normalized.startswith(
-        BLACKLIST_MESSAGE_PREFIX
-    )
+    return normalized.startswith(NO_RESULTS_MESSAGE_PREFIX) or normalized.startswith(BLACKLIST_MESSAGE_PREFIX)
 
 
 def _is_age_restricted_rating(value: str) -> bool:
@@ -213,9 +211,7 @@ class NekosiaCog(commands.Cog):
         tags = _read_list_of_strings(image_payload, "tags")
 
         color = _hex_to_discord_color(
-            image_payload.get("colors", {}).get("main")
-            if isinstance(image_payload.get("colors"), dict)
-            else None
+            image_payload.get("colors", {}).get("main") if isinstance(image_payload.get("colors"), dict) else None
         )
         embed = discord.Embed(
             title=f"NekoSia - {category_label}",
@@ -445,9 +441,7 @@ class NekosiaCog(commands.Cog):
         ]
         if fallback_used:
             for embed in embeds:
-                embed.set_footer(
-                    text=f"{embed.footer.text} | fallback: category=nothing + additionalTags"
-                )
+                embed.set_footer(text=f"{embed.footer.text} | fallback: category=nothing + additionalTags")
         await interaction.followup.send(embeds=embeds)
 
     @nekosia.autocomplete("category")

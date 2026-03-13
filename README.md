@@ -74,6 +74,11 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
    pip install -r requirements.txt
    ```
 
+   **(Opcional - desenvolvimento)** Instale formatador e lint:
+   ```bash
+   pip install -r requirements-dev.txt
+   ```
+
 4. **Configure as variáveis de ambiente:**
    Copie o arquivo `.env.example` para `.env` e preencha os campos:
    ```bash
@@ -99,6 +104,28 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 
 ---
 
+## 🧹 Qualidade de Código (Python)
+
+Este projeto está configurado com:
+- **Black** como formatador (estilo "prettier" para Python).
+- **Ruff** como lint.
+
+Comandos úteis:
+```bash
+# Formatar o projeto
+python -m black .
+
+# Verificar lint
+python -m ruff check .
+
+# Corrigir automaticamente problemas suportados pelo Ruff
+python -m ruff check . --fix
+```
+
+As configurações ficam em `pyproject.toml`.
+
+---
+
 ## 📂 Estrutura do Projeto
 
 ```text
@@ -111,8 +138,10 @@ ayana-bot/
 │   └── welcome.py       # Sistema de boas-vindas
 ├── logs/                # Arquivos de log do sistema
 ├── main.py              # Ponto de entrada do bot
+├── pyproject.toml       # Configuração do Black + Ruff
 ├── warn_store.py        # Core de persistência e lógica de avisos
 ├── requirements.txt     # Dependências do projeto
+├── requirements-dev.txt # Dependências de desenvolvimento (lint/format)
 └── .env                 # Configurações sensíveis
 ```
 

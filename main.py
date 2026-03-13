@@ -9,6 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
+
 from warn_store import MySQLConfig, WarnStore
 
 LOGGER = logging.getLogger("ayana")
@@ -118,9 +119,7 @@ async def send_ephemeral(interaction: discord.Interaction, message: str) -> None
         else:
             await interaction.response.send_message(message, ephemeral=True)
     except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-        LOGGER.warning(
-            "Nao foi possivel responder a interacao (expirada, sem permissao ou canal removido)."
-        )
+        LOGGER.warning("Nao foi possivel responder a interacao (expirada, sem permissao ou canal removido).")
 
 
 def setup_logging() -> None:
@@ -341,9 +340,7 @@ def main() -> None:
     if not token:
         raise RuntimeError("A variavel DISCORD_TOKEN nao foi encontrada no .env.")
     if not looks_like_discord_token(token):
-        raise RuntimeError(
-            "DISCORD_TOKEN parece invalido. Use o token do Bot em Developer Portal > Bot > Reset Token."
-        )
+        raise RuntimeError("DISCORD_TOKEN parece invalido. Use o token do Bot em Developer Portal > Bot > Reset Token.")
     if os.getenv("GUILD_ID") and guild_id is None:
         LOGGER.warning("GUILD_ID invalido. Sync sera global.")
     if os.getenv("DONO_ID") and owner_id is None:

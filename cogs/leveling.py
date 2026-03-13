@@ -58,9 +58,7 @@ class LevelingCog(commands.Cog):
     @staticmethod
     def _ensure_canvas_support() -> None:
         if Image is None or ImageDraw is None or ImageFont is None:
-            raise RuntimeError(
-                "Canvas indisponivel: instale `Pillow` (rode `pip install -r requirements.txt`)."
-            )
+            raise RuntimeError("Canvas indisponivel: instale `Pillow` (rode `pip install -r requirements.txt`).")
 
     @staticmethod
     def _resample_filter() -> int:
@@ -447,9 +445,20 @@ class LevelingCog(commands.Cog):
             cup_top = y + int(size * 0.16)
             cup_right = x + int(size * 0.82)
             cup_bottom = y + int(size * 0.56)
-            draw.rounded_rectangle((cup_left, cup_top, cup_right, cup_bottom), radius=max(1, int(size * 0.1)), outline=color, width=max(1, size // 10))
-            draw.rectangle((x + int(size * 0.42), y + int(size * 0.56), x + int(size * 0.58), y + int(size * 0.78)), fill=color)
-            draw.rounded_rectangle((x + int(size * 0.28), y + int(size * 0.78), x + int(size * 0.72), y + int(size * 0.92)), radius=max(1, int(size * 0.07)), fill=color)
+            draw.rounded_rectangle(
+                (cup_left, cup_top, cup_right, cup_bottom),
+                radius=max(1, int(size * 0.1)),
+                outline=color,
+                width=max(1, size // 10),
+            )
+            draw.rectangle(
+                (x + int(size * 0.42), y + int(size * 0.56), x + int(size * 0.58), y + int(size * 0.78)), fill=color
+            )
+            draw.rounded_rectangle(
+                (x + int(size * 0.28), y + int(size * 0.78), x + int(size * 0.72), y + int(size * 0.92)),
+                radius=max(1, int(size * 0.07)),
+                fill=color,
+            )
             return
         if kind == "messages":
             bubble = (x + int(size * 0.08), y + int(size * 0.12), x + int(size * 0.92), y + int(size * 0.76))
@@ -816,7 +825,9 @@ class LevelingCog(commands.Cog):
         scale = max(1, int(self.RANK_RENDER_SCALE))
         width = self.CARD_WIDTH * scale
         height = self.RANK_CARD_HEIGHT * scale
-        s = lambda value: int(value * scale)
+
+        def s(value: int | float) -> int:
+            return int(value * scale)
 
         image = Image.new("RGBA", (width, height), (0, 0, 0, 255))
         draw = ImageDraw.Draw(image)
@@ -991,11 +1002,21 @@ class LevelingCog(commands.Cog):
         status_cx = avatar_x + avatar_size - s(8)
         status_cy = avatar_y + avatar_size - s(8)
         draw.ellipse(
-            (status_cx - status_radius - s(3), status_cy - status_radius - s(3), status_cx + status_radius + s(3), status_cy + status_radius + s(3)),
+            (
+                status_cx - status_radius - s(3),
+                status_cy - status_radius - s(3),
+                status_cx + status_radius + s(3),
+                status_cy + status_radius + s(3),
+            ),
             fill=(7, 18, 40, 255),
         )
         draw.ellipse(
-            (status_cx - status_radius, status_cy - status_radius, status_cx + status_radius, status_cy + status_radius),
+            (
+                status_cx - status_radius,
+                status_cy - status_radius,
+                status_cx + status_radius,
+                status_cy + status_radius,
+            ),
             fill=(39, 199, 113, 255),
             outline=(171, 255, 212, 210),
             width=max(1, s(1)),
@@ -1361,7 +1382,9 @@ class LevelingCog(commands.Cog):
                     fill=(238, 243, 255, 255),
                     emoji_draw=emoji_draw,
                 )
-                draw.text((col_level, value_text_y), str(int(row["level"])), font=row_value_font, fill=(229, 236, 255, 255))
+                draw.text(
+                    (col_level, value_text_y), str(int(row["level"])), font=row_value_font, fill=(229, 236, 255, 255)
+                )
                 draw.text(
                     (col_xp, value_text_y),
                     self._format_int(int(row["total_xp"])),
@@ -1413,11 +1436,7 @@ class LevelingCog(commands.Cog):
         self._xp_cooldowns[key] = now
         if len(self._xp_cooldowns) > 50_000:
             cutoff = now - (self.XP_COOLDOWN_SECONDS * 4)
-            self._xp_cooldowns = {
-                cache_key: ts
-                for cache_key, ts in self._xp_cooldowns.items()
-                if ts >= cutoff
-            }
+            self._xp_cooldowns = {cache_key: ts for cache_key, ts in self._xp_cooldowns.items() if ts >= cutoff}
         return False
 
     async def _announce_level_up(self, message: discord.Message, payload: dict[str, Any]) -> None:

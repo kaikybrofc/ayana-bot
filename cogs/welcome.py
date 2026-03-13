@@ -293,10 +293,7 @@ class WelcomeCog(commands.Cog):
         )
         embed.add_field(
             name="DM",
-            value=(
-                "Status: `Desligado (fixo)`\n"
-                "```Envio de DM de boas-vindas desativado por seguranca.```"
-            ),
+            value=("Status: `Desligado (fixo)`\n" "```Envio de DM de boas-vindas desativado por seguranca.```"),
             inline=False,
         )
         embed.set_footer(
