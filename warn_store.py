@@ -256,6 +256,19 @@ class WarnStore:
             INDEX idx_user_levels_level (guild_id, level, total_xp)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
+        create_command_usage = """
+        CREATE TABLE IF NOT EXISTS command_usage (
+            guild_id BIGINT UNSIGNED NOT NULL,
+            user_id BIGINT UNSIGNED NOT NULL,
+            command_name VARCHAR(128) NOT NULL,
+            use_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            first_used_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_used_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, user_id, command_name),
+            INDEX idx_command_usage_user (guild_id, user_id, use_count),
+            INDEX idx_command_usage_last_used (guild_id, user_id, last_used_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
         async with self.pool.acquire() as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute("SET SESSION sql_notes = 0")
@@ -264,6 +277,7 @@ class WarnStore:
                     await cursor.execute(create_guild_settings)
                     await cursor.execute(create_infractions)
                     await cursor.execute(create_user_levels)
+                    await cursor.execute(create_command_usage)
                     await self._ensure_warning_expiration_column(cursor)
                     await self._ensure_guild_settings_columns(cursor)
                 finally:
@@ -619,6 +633,148 @@ class WarnStore:
                 rows = await cursor.fetchall()
 
         return list(rows or [])
+
+    async def log_command_usage(self, guild_id: int, user_id: int, command_name: str) -> None:
+        clean_name = command_name.strip().lower()[:128]
+        if not clean_name:
+            return
+
+        async with self.pool.acquire() as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    """
+                    INSERT INTO command_usage (guild_id, user_id, command_name, use_count)
+                    VALUES (%s, %s, %s, 1)
+                    ON DUPLICATE KEY UPDATE
+                        use_count = use_count + 1,
+                        last_used_at = CURRENT_TIMESTAMP
+                    """,
+                    (guild_id, user_id, clean_name),
+                )
+
+    async def get_member_command_usage(
+        self,
+        guild_id: int,
+        user_id: int,
+        limit: int = 5,
+    ) -> dict[str, Any]:
+        safe_limit = max(1, min(limit, 25))
+        async with self.pool.acquire() as connection:
+            async with connection.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    """
+                    SELECT
+                        COALESCE(SUM(use_count), 0) AS total_used,
+                        COUNT(*) AS unique_commands,
+                        MAX(last_used_at) AS last_used_at
+                    FROM command_usage
+                    WHERE guild_id = %s AND user_id = %s
+                    """,
+                    (guild_id, user_id),
+                )
+                summary_row = await cursor.fetchone()
+
+                await cursor.execute(
+                    """
+                    SELECT command_name, use_count, last_used_at
+                    FROM command_usage
+                    WHERE guild_id = %s AND user_id = %s
+                    ORDER BY use_count DESC, last_used_at DESC
+                    LIMIT %s
+                    """,
+                    (guild_id, user_id, safe_limit),
+                )
+                rows = await cursor.fetchall()
+
+        return {
+            "total_used": int(summary_row["total_used"]) if summary_row else 0,
+            "unique_commands": int(summary_row["unique_commands"]) if summary_row else 0,
+            "last_used_at": summary_row["last_used_at"] if summary_row else None,
+            "top_commands": [
+                {
+                    "command_name": str(row["command_name"]),
+                    "use_count": int(row["use_count"]),
+                    "last_used_at": row["last_used_at"],
+                }
+                for row in (rows or [])
+            ],
+        }
+
+    async def get_member_moderation_overview(self, guild_id: int, user_id: int) -> dict[str, Any]:
+        async with self.pool.acquire() as connection:
+            async with connection.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS warnings_total,
+                        COALESCE(SUM(expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP), 0) AS warnings_active
+                    FROM warnings
+                    WHERE guild_id = %s AND user_id = %s
+                    """,
+                    (guild_id, user_id),
+                )
+                warnings_row = await cursor.fetchone()
+
+                await cursor.execute(
+                    """
+                    SELECT COUNT(*) AS infractions_total
+                    FROM infractions
+                    WHERE guild_id = %s AND user_id = %s
+                    """,
+                    (guild_id, user_id),
+                )
+                infractions_total_row = await cursor.fetchone()
+
+                await cursor.execute(
+                    """
+                    SELECT action, COUNT(*) AS qty
+                    FROM infractions
+                    WHERE guild_id = %s AND user_id = %s
+                    GROUP BY action
+                    ORDER BY qty DESC, action ASC
+                    LIMIT 12
+                    """,
+                    (guild_id, user_id),
+                )
+                by_action_rows = await cursor.fetchall()
+
+                await cursor.execute(
+                    """
+                    SELECT action, reason, created_at
+                    FROM infractions
+                    WHERE guild_id = %s AND user_id = %s
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (guild_id, user_id),
+                )
+                last_infraction = await cursor.fetchone()
+
+        warnings_total = int(warnings_row["warnings_total"]) if warnings_row else 0
+        warnings_active = int(warnings_row["warnings_active"]) if warnings_row else 0
+        warnings_expired = max(0, warnings_total - warnings_active)
+        infractions_total = int(infractions_total_row["infractions_total"]) if infractions_total_row else 0
+
+        action_counts: dict[str, int] = {}
+        for row in by_action_rows or []:
+            action_counts[str(row["action"])] = int(row["qty"])
+
+        normalized_last_infraction = None
+        if last_infraction:
+            normalized_last_infraction = {
+                "action": str(last_infraction["action"]),
+                "reason": str(last_infraction["reason"]),
+                "created_at": last_infraction["created_at"],
+            }
+
+        return {
+            "warnings_total": warnings_total,
+            "warnings_active": warnings_active,
+            "warnings_expired": warnings_expired,
+            "infractions_total": infractions_total,
+            "action_counts": action_counts,
+            "last_infraction": normalized_last_infraction,
+        }
 
     async def add_level_xp(self, guild_id: int, user_id: int, xp_gain: int) -> dict[str, Any]:
         gain = max(0, int(xp_gain))

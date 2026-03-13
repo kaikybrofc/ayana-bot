@@ -253,6 +253,39 @@ class AyanaBot(commands.Bot):
             return
         LOGGER.info("Logado como %s (id=%s)", self.user, self.user.id)
 
+    async def on_app_command_completion(
+        self,
+        interaction: discord.Interaction,
+        command: app_commands.Command | app_commands.ContextMenu,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            return
+
+        user = interaction.user
+        user_id = getattr(user, "id", None)
+        if not isinstance(user_id, int):
+            return
+
+        command_name = getattr(command, "qualified_name", None) or getattr(command, "name", None)
+        if not isinstance(command_name, str) or not command_name.strip():
+            return
+
+        try:
+            await self.warn_store.log_command_usage(
+                guild_id=guild.id,
+                user_id=user_id,
+                command_name=command_name,
+            )
+        except Exception as exc:
+            LOGGER.warning(
+                "Falha ao registrar uso de comando no MySQL. guild=%s user=%s command=%s",
+                guild.id,
+                user_id,
+                command_name,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+
     async def close(self) -> None:
         try:
             await self.warn_store.close()
