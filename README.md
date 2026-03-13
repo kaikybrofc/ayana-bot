@@ -157,6 +157,7 @@ O bot oferece comandos extensivos de configuração para administradores:
 | `/timeout` | Moderação | Silencia um membro temporariamente. |
 | `/warn` | Moderação | Aplica um aviso formal a um membro. |
 | `/clear` | Moderação | Limpa mensagens do canal atual. |
+| `/nick` | Moderação | Altera forçadamente o apelido de um membro. |
 | `/slowmode` | Moderação | Ajusta o cooldown de mensagens de um canal. |
 | `/lockdown` | Moderação | Tranca o canal removendo envio de mensagens do @everyone. |
 | `/nekosia` | Imagens | Busca imagens variadas da API NekoSia. |

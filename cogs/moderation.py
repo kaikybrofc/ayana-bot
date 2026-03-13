@@ -760,6 +760,104 @@ class ModerationCog(commands.Cog):
             ephemeral=True,
         )
 
+    @app_commands.command(name="nick", description="Altera o apelido de um membro no servidor.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_nicknames=True)
+    @app_commands.checks.has_permissions(manage_nicknames=True)
+    @app_commands.checks.bot_has_permissions(manage_nicknames=True)
+    @app_commands.describe(
+        membro="Membro que tera o apelido alterado.",
+        novo_nome="Novo apelido (1 a 32 caracteres).",
+    )
+    async def nick(
+        self,
+        interaction: discord.Interaction,
+        membro: discord.Member,
+        novo_nome: app_commands.Range[str, 1, 32],
+    ) -> None:
+        guild = interaction.guild
+        actor = interaction.user
+        if guild is None or not isinstance(actor, discord.Member):
+            await interaction.response.send_message(
+                "Este comando so funciona em servidor.",
+                ephemeral=True,
+            )
+            return
+
+        allowed, message = self._can_moderate(guild, actor, membro)
+        if not allowed:
+            await interaction.response.send_message(message or "Acao negada.", ephemeral=True)
+            return
+
+        clean_nickname = novo_nome.strip()
+        if not clean_nickname:
+            await interaction.response.send_message(
+                "Informe um apelido valido entre 1 e 32 caracteres.",
+                ephemeral=True,
+            )
+            return
+
+        old_nickname = membro.nick
+        if old_nickname == clean_nickname:
+            await interaction.response.send_message(
+                f"{membro.mention} ja esta com esse apelido.",
+                ephemeral=True,
+            )
+            return
+
+        audit_reason = self._build_reason(
+            actor,
+            f"Alteracao de apelido para `{clean_nickname}` em {membro} ({membro.id}).",
+        )
+        try:
+            await membro.edit(nick=clean_nickname, reason=audit_reason)
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "Nao consegui alterar o apelido desse membro por permissao/hierarquia.",
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException:
+            await interaction.response.send_message(
+                "Falha ao alterar o apelido agora. Tente novamente.",
+                ephemeral=True,
+            )
+            return
+
+        old_display = old_nickname if old_nickname else membro.name
+        await self._safe_log_infraction(
+            guild_id=guild.id,
+            user_id=membro.id,
+            actor_id=actor.id,
+            action="nick",
+            reason=f"Apelido alterado de `{old_display}` para `{clean_nickname}`.",
+        )
+
+        try:
+            settings = await self._get_guild_settings(guild.id)
+            await self._send_modlog(
+                guild=guild,
+                settings=settings,
+                title="Apelido alterado",
+                description=(
+                    f"Usuario: {membro.mention}\n"
+                    f"Moderador: {actor.mention}\n"
+                    f"De: `{old_display}`\n"
+                    f"Para: `{clean_nickname}`"
+                ),
+                color=discord.Color.blurple(),
+            )
+        except Exception as exc:
+            LOGGER.error(
+                "Falha ao registrar mod-log de /nick.",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+
+        await interaction.response.send_message(
+            f"Apelido de {membro.mention} atualizado para `{clean_nickname}`.",
+            ephemeral=True,
+        )
+
     @app_commands.command(name="kick", description="Expulsa um membro do servidor.")
     @app_commands.guild_only()
     @app_commands.default_permissions(kick_members=True)

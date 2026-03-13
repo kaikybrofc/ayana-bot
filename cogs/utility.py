@@ -91,6 +91,13 @@ COMMAND_DETAILS: dict[str, dict[str, str]] = {
         "escopo": "Apenas servidor",
         "detalhes": "Tranca o canal removendo a permissao de envio de mensagens para @everyone.",
     },
+    "nick": {
+        "categoria": "Moderacao",
+        "uso": "/nick <membro> <novo_nome>",
+        "permissoes": "Manage Nicknames",
+        "escopo": "Apenas servidor",
+        "detalhes": "Altera forcadamente o apelido de um membro no servidor.",
+    },
     "kick": {
         "categoria": "Moderacao",
         "uso": "/kick <member> [reason]",
