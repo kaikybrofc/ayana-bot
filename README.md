@@ -27,9 +27,9 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 ### 🎵 Sistema de Música
 - **Player em Canal de Voz**: Comandos slash para conectar, tocar, pausar, retomar e sair do canal.
 - **Fila por Servidor**: Gerenciamento de músicas em memória com skip, stop e visualização da queue.
-- **Busca + Stream Imediato**: Reprodução via **Lavalink** com busca YouTube.
-- **Cookies no Lavalink**: Compatível com cookies para reduzir bloqueios anti-bot.
-- **Diagnóstico Rápido**: `/music setup` valida Lavalink + cookies + stack de voz (`PyNaCl`/`davey`).
+- **Busca + Stream Imediato**: Reprodução local com `yt-dlp` + `ffmpeg`.
+- **Cookies no yt-dlp**: Compatível com cookies para reduzir bloqueios anti-bot do YouTube.
+- **Diagnóstico Rápido**: `/music setup` valida `yt-dlp`, `ffmpeg`, cookies e stack de voz (`PyNaCl`/`davey`).
 
 ### 🖼️ Integração NekoSia
 - **Busca de Imagens**: Acesso à API NekoSia com filtros por categoria, tags e animes.
@@ -48,7 +48,7 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 - **Framework**: [Discord.py 2.4](https://discordpy.readthedocs.io/)
 - **Banco de Dados**: [MySQL](https://www.mysql.com/) / [aiomysql](https://github.com/aio-libs/aiomysql)
 - **Processamento de Imagem**: [Pillow](https://python-pillow.org/) & [Pilmoji](https://github.com/dtimofeev/pilmoji)
-- **Audio/Streaming**: `discord.py[voice]` (`PyNaCl` + `davey`), [`wavelink`](https://github.com/PythonistaGuild/Wavelink), servidor **Lavalink**.
+- **Audio/Streaming**: `discord.py[voice]` (`PyNaCl` + `davey`), `yt-dlp`, `ffmpeg`.
 - **Outros**: `aiohttp`, `python-dotenv`, `regex`.
 
 ---
@@ -58,8 +58,8 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 - Python 3.10 ou superior.
 - Instância do MySQL 8.0+.
 - Token do bot no [Discord Developer Portal](https://discord.com/developers/applications).
-- Servidor **Lavalink** instalado e em execução.
-- Cookies configurados no Lavalink para YouTube (recomendado).
+- `ffmpeg` disponível no sistema.
+- `yt-dlp` instalado e cookies válidos para YouTube (recomendado).
 
 ---
 
@@ -89,12 +89,13 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
    pip install -r requirements-dev.txt
    ```
 
-4. **Instale e inicie o Lavalink:**
-   Use o projeto oficial:  
-   **https://github.com/lavalink-devs/Lavalink**
+4. **Configure binários de música local:**
+   Garanta que `ffmpeg` e `yt-dlp` estejam instalados e acessíveis no PATH.
 
-   > Configure os plugins/sources do Lavalink para YouTube com cookies.
-   > No Ayana, o nó padrão esperado é `http://127.0.0.1:2333`.
+   Para iniciar o bot com PM2:
+   ```bash
+   pm2 start ecosystem.config.js --only ayana-bot
+   ```
 
 5. **Configure as variáveis de ambiente:**
    Copie o arquivo `.env.example` para `.env` e preencha os campos:
@@ -118,11 +119,11 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
    ENABLE_MEMBERS_INTENT=true
    ENABLE_MESSAGE_CONTENT_INTENT=true
 
-   # Musica (requer Lavalink + cookies no servidor Lavalink)
-   LAVALINK_URI=http://127.0.0.1:2333
-   LAVALINK_PASSWORD=youshallnotpass
-   LAVALINK_NODE_ID=ayana-node
-   LAVALINK_COOKIES_PATH=/opt/lavalink/cookies.txt
+   # Musica (Python + yt-dlp + ffmpeg)
+   FFMPEG_PATH=ffmpeg
+   MUSIC_YTDLP_PATH=/root/.local/bin/yt-dlp
+   MUSIC_YTDLP_JS_RUNTIME=node
+   MUSIC_YTDLP_COOKIES_PATH=/root/ayana-bot/cookies.txt
    ```
 
 ---

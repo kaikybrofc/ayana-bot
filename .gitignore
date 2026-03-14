@@ -27,10 +27,8 @@ htmlcov/
 logs/
 *.log
 
-# Processo local
-ecosystem.config.js
-
 # Ferramentas/IDE
 .vscode/
 .idea/
 .DS_Store
+cookies.txt
