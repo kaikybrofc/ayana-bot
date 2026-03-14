@@ -27,9 +27,9 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 ### 🎵 Sistema de Música
 - **Player em Canal de Voz**: Comandos slash para conectar, tocar, pausar, retomar e sair do canal.
 - **Fila por Servidor**: Gerenciamento de músicas em memória com skip, stop e visualização da queue.
-- **Busca + Stream Imediato**: Reprodução local com `yt-dlp` + `ffmpeg`.
-- **Cookies no yt-dlp**: Compatível com cookies para reduzir bloqueios anti-bot do YouTube.
-- **Diagnóstico Rápido**: `/music setup` valida `yt-dlp`, `ffmpeg`, cookies e stack de voz (`PyNaCl`/`davey`).
+- **Busca + Resolve + Stream via API**: Integração com `yt-dls` (`/search`, `/resolve`, `/stream` e `/prefetch`).
+- **Baixa Latência**: Uso de prefetch para aquecer stream e iniciar playback mais rápido.
+- **Diagnóstico Rápido**: `/music setup` valida `ffmpeg`, API de música e stack de voz (`PyNaCl`/`davey`).
 
 ### 🖼️ Integração NekoSia
 - **Busca de Imagens**: Acesso à API NekoSia com filtros por categoria, tags e animes.
@@ -48,7 +48,7 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 - **Framework**: [Discord.py 2.4](https://discordpy.readthedocs.io/)
 - **Banco de Dados**: [MySQL](https://www.mysql.com/) / [aiomysql](https://github.com/aio-libs/aiomysql)
 - **Processamento de Imagem**: [Pillow](https://python-pillow.org/) & [Pilmoji](https://github.com/dtimofeev/pilmoji)
-- **Audio/Streaming**: `discord.py[voice]` (`PyNaCl` + `davey`), `yt-dlp`, `ffmpeg`.
+- **Audio/Streaming**: `discord.py[voice]` (`PyNaCl` + `davey`), `ffmpeg`, API local [`yt-dls`](https://github.com/kaikybrofc/yt-dls).
 - **Outros**: `aiohttp`, `python-dotenv`, `regex`.
 
 ---
@@ -59,7 +59,7 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 - Instância do MySQL 8.0+.
 - Token do bot no [Discord Developer Portal](https://discord.com/developers/applications).
 - `ffmpeg` disponível no sistema.
-- `yt-dlp` instalado e cookies válidos para YouTube (recomendado).
+- API local [`yt-dls`](https://github.com/kaikybrofc/yt-dls) instalada e em execução.
 
 ---
 
@@ -89,15 +89,34 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
    pip install -r requirements-dev.txt
    ```
 
-4. **Configure binários de música local:**
-   Garanta que `ffmpeg` e `yt-dlp` estejam instalados e acessíveis no PATH.
+4. **Instale e configure a API de música (`yt-dls`):**
 
-   Para iniciar o bot com PM2:
+   > Repositório oficial: https://github.com/kaikybrofc/yt-dls
+
    ```bash
-   pm2 start ecosystem.config.js --only ayana-bot
+   # Em outro diretório (fora do ayana-bot)
+   git clone https://github.com/kaikybrofc/yt-dls.git
+   cd yt-dls
+
+   npm install
+   npm run install:yt-dlp
    ```
 
-5. **Configure as variáveis de ambiente:**
+   Configure o arquivo `cookies.txt` na raiz da API (formato Netscape), conforme instruções do README da própria `yt-dls`.
+
+   Inicie a API:
+   ```bash
+   npm start
+   # ou com PM2:
+   npm run start:pm2
+   ```
+
+   A API padrão sobe em:
+   ```text
+   http://127.0.0.1:3013
+   ```
+
+5. **Configure as variáveis de ambiente do bot:**
    Copie o arquivo `.env.example` para `.env` e preencha os campos:
    ```bash
    cp .env.example .env
@@ -119,12 +138,19 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
    ENABLE_MEMBERS_INTENT=true
    ENABLE_MESSAGE_CONTENT_INTENT=true
 
-   # Musica (Python + yt-dlp + ffmpeg)
+   # Música (bot + API yt-dls)
    FFMPEG_PATH=ffmpeg
-   MUSIC_YTDLP_PATH=/root/.local/bin/yt-dlp
-   MUSIC_YTDLP_JS_RUNTIME=node
-   MUSIC_YTDLP_COOKIES_PATH=/root/ayana-bot/cookies.txt
+   MUSIC_API_BASE_URL=http://127.0.0.1:3013
    ```
+
+6. **Inicie o bot:**
+   ```bash
+   pm2 start ecosystem.config.js --only ayana-bot
+   ```
+
+7. **Valide a integração de música no Discord:**
+   - Use `/music setup` para checar `ffmpeg` e conectividade com a API.
+   - Use `/music play` com URL ou nome da música.
 
 ---
 
@@ -206,7 +232,7 @@ O bot oferece comandos extensivos de configuração para administradores:
 | `/help` | Utilitários | Lista todos os comandos ou detalhes de um específico. |
 | `/rank` | Nível | Mostra seu cartão de nível e XP atual. |
 | `/leaderboard`| Nível | Exibe o ranking de XP do servidor em imagem. |
-| `/music play` | Música | Busca/toca música e adiciona na fila do servidor. |
+| `/music play` | Música | Busca no `/search`, resolve no `/resolve` e toca via `/stream`. |
 | `/music queue` | Música | Mostra música atual e próximas faixas da fila. |
 | `/music pause` | Música | Pausa a música atual (mesmo canal de voz do bot). |
 | `/music resume` | Música | Retoma a reprodução pausada. |
