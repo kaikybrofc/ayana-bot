@@ -1,23 +1,19 @@
+from __future__ import annotations
+
 import asyncio
-import json
 import logging
 import os
 import re
-import shutil
-import time
-from collections import deque
-from dataclasses import dataclass, field
-from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
+from dataclasses import dataclass
 
-import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 try:
-    import yt_dlp
+    import wavelink
 except ImportError:  # pragma: no cover - optional dependency in runtime
-    yt_dlp = None
+    wavelink = None
 
 try:
     import nacl  # noqa: F401
@@ -33,55 +29,15 @@ LOGGER = logging.getLogger("ayana.cogs.music")
 
 URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 IDLE_TIMEOUT_SECONDS = 300
-DEFAULT_VOLUME = 0.6
+DEFAULT_VOLUME_PERCENT = 60
 MAX_QUEUE_ITEMS = 100
 
-YTDLP_OPTIONS = {
-    "format": "bestaudio/best",
-    "default_search": "ytsearch",
-    "noplaylist": True,
-    "quiet": True,
-    "no_warnings": True,
-    "extract_flat": False,
-    "skip_download": True,
-}
-# `-reconnect*` quebra em alguns builds/inputs locais; usamos opções seguras para arquivos e streams.
-FFMPEG_BEFORE_OPTIONS = "-nostdin"
-FFMPEG_OPTIONS = "-vn"
-
 
 @dataclass(slots=True)
-class MusicTrack:
-    title: str
-    stream_url: str
-    webpage_url: str
-    requester_id: int
-    guild_id: int | None = None
-    duration_seconds: int | None = None
-    thumbnail_url: str | None = None
-    cleanup_path: str | None = None
-    track_id: str | None = None
-    stream_expires_at_ms: int | None = None
-    uploader_name: str | None = None
-    source_name: str | None = None
-    view_count: int | None = None
-
-
-@dataclass(slots=True)
-class GuildMusicPlayer:
+class GuildMusicState:
     guild_id: int
-    voice_client: discord.VoiceClient | None = None
     announce_channel_id: int | None = None
-    current: MusicTrack | None = None
-    queue: deque[MusicTrack] = field(default_factory=deque)
-    queue_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    queue_event: asyncio.Event = field(default_factory=asyncio.Event)
-    next_track_event: asyncio.Event = field(default_factory=asyncio.Event)
-    loop_task: asyncio.Task[None] | None = None
-    last_play_error: Exception | None = None
-    volume: float = DEFAULT_VOLUME
-    prefetched_track_ids: set[str] = field(default_factory=set)
-    prefetch_task: asyncio.Task[None] | None = None
+    idle_task: asyncio.Task[None] | None = None
 
 
 class MusicCog(commands.Cog):
@@ -89,31 +45,24 @@ class MusicCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self._players: dict[int, GuildMusicPlayer] = {}
+        self._states: dict[int, GuildMusicState] = {}
+
+    async def cog_load(self) -> None:
+        await self._ensure_lavalink_node()
 
     def cog_unload(self) -> None:
-        for player in list(self._players.values()):
-            if player.loop_task and not player.loop_task.done():
-                player.loop_task.cancel()
-            if player.prefetch_task and not player.prefetch_task.done():
-                player.prefetch_task.cancel()
-            if player.voice_client and player.voice_client.is_connected():
-                asyncio.create_task(player.voice_client.disconnect(force=True))
-        self._players.clear()
+        for state in self._states.values():
+            self._cancel_idle_task(state)
 
-    @staticmethod
-    def _is_url(value: str) -> bool:
-        return bool(URL_RE.match(value.strip()))
+        if wavelink is None:
+            self._states.clear()
+            return
 
-    @staticmethod
-    def _format_duration(total_seconds: int | None) -> str:
-        if total_seconds is None or total_seconds <= 0:
-            return "ao vivo/desconhecida"
-        hours, remainder = divmod(total_seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        if hours:
-            return f"{hours}:{minutes:02d}:{seconds:02d}"
-        return f"{minutes}:{seconds:02d}"
+        for voice_client in list(self.bot.voice_clients):
+            if isinstance(voice_client, wavelink.Player) and voice_client.connected:
+                asyncio.create_task(voice_client.disconnect())
+
+        self._states.clear()
 
     @staticmethod
     async def _respond(interaction: discord.Interaction, message: str, *, ephemeral: bool = False) -> None:
@@ -136,796 +85,115 @@ class MusicCog(commands.Cog):
         await interaction.response.send_message(content=message, embed=embed, ephemeral=ephemeral)
 
     @staticmethod
-    def _format_view_count(view_count: int | None) -> str:
-        if view_count is None:
-            return "n/d"
-        return f"{view_count:,}"
+    def _is_url(value: str | None) -> bool:
+        if not value:
+            return False
+        return bool(URL_RE.match(value.strip()))
 
-    def _build_track_embed(
-        self,
-        track: MusicTrack,
-        *,
-        header: str,
-        queue_position: int | None = None,
-    ) -> discord.Embed:
-        description = f"[{track.title}]({track.webpage_url})" if self._is_url(track.webpage_url) else track.title
-        embed = discord.Embed(
-            title=header,
-            description=description,
-            color=discord.Color.blurple(),
-        )
-        embed.add_field(name="Duração", value=f"`{self._format_duration(track.duration_seconds)}`", inline=True)
-        embed.add_field(name="Pedido por", value=f"<@{track.requester_id}>", inline=True)
-        if queue_position is not None:
-            embed.add_field(name="Posição", value=f"`{queue_position}`", inline=True)
+    @staticmethod
+    def _format_duration_ms(length_ms: int | None) -> str:
+        if length_ms is None or length_ms <= 0:
+            return "ao vivo/desconhecida"
 
-        if track.uploader_name:
-            embed.add_field(name="Canal", value=track.uploader_name, inline=True)
-        if track.source_name:
-            embed.add_field(name="Fonte", value=track.source_name, inline=True)
-        if track.view_count is not None:
-            embed.add_field(name="Views", value=f"`{self._format_view_count(track.view_count)}`", inline=True)
+        total_seconds = int(length_ms // 1000)
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours:
+            return f"{hours}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes}:{seconds:02d}"
 
-        if track.track_id:
-            embed.set_footer(text=f"track_id: {track.track_id}")
-        if track.thumbnail_url and self._is_url(track.thumbnail_url):
-            embed.set_thumbnail(url=track.thumbnail_url)
-        return embed
+    @staticmethod
+    def _parse_bool_env(raw_value: str | None, default: bool = False) -> bool:
+        if raw_value is None:
+            return default
 
-    def _ffmpeg_binary(self) -> str:
-        configured = os.getenv("FFMPEG_BINARY", "ffmpeg").strip()
-        return configured or "ffmpeg"
+        lowered = raw_value.strip().lower()
+        truthy = {"1", "true", "yes", "y", "on", "enable", "enabled"}
+        falsy = {"0", "false", "no", "n", "off", "disable", "disabled"}
 
-    def _ytdls_api_base_url(self) -> str | None:
-        configured = os.getenv("YTDLS_API_BASE_URL")
+        if lowered in truthy:
+            return True
+        if lowered in falsy:
+            return False
+        return default
+
+    def _lavalink_uri(self) -> str:
+        return os.getenv("LAVALINK_URI", "http://127.0.0.1:2333").strip()
+
+    def _lavalink_password(self) -> str:
+        return os.getenv("LAVALINK_PASSWORD", "").strip()
+
+    def _lavalink_cookies_path(self) -> str | None:
+        configured = os.getenv("LAVALINK_COOKIES_PATH")
         if configured is None:
             return None
-
-        normalized = configured.strip().rstrip("/")
-        if not normalized:
-            return None
-        return normalized
+        normalized = configured.strip()
+        return normalized or None
 
     @staticmethod
-    def _prefetch_enabled() -> bool:
-        raw = os.getenv("YTDLS_PREFETCH_ENABLED", "true").strip().lower()
-        return raw not in {"0", "false", "no", "off"}
-
-    @staticmethod
-    def _parse_json_object(payload: str) -> dict[str, object] | None:
-        if not payload.strip():
-            return None
-        try:
-            parsed = json.loads(payload)
-        except (TypeError, ValueError):
-            return None
-        return parsed if isinstance(parsed, dict) else None
-
-    @staticmethod
-    def _extract_upstream_status_code(payload: str, payload_json: dict[str, object] | None = None) -> int | None:
-        candidates: list[object] = []
-        if payload_json is not None:
-            candidates.extend((payload_json.get("statusCode"), payload_json.get("status_code")))
-            error_value = payload_json.get("erro")
-            if isinstance(error_value, dict):
-                candidates.extend((error_value.get("statusCode"), error_value.get("status_code")))
-
-        for candidate in candidates:
-            if isinstance(candidate, bool):
-                continue
-            if isinstance(candidate, (int, float)):
-                parsed = int(candidate)
-                if 100 <= parsed <= 599:
-                    return parsed
-                continue
-            if isinstance(candidate, str):
-                raw = candidate.strip()
-                if raw.isdigit():
-                    parsed = int(raw)
-                    if 100 <= parsed <= 599:
-                        return parsed
-
-        matched = re.search(r"\bstatus(?:\s*[:=]|\s+)(\d{3})\b", payload, flags=re.IGNORECASE)
-        if matched:
-            return int(matched.group(1))
-        return None
-
-    @staticmethod
-    def _ytdls_request_headers(guild_id: int | None = None) -> dict[str, str]:
-        if guild_id is None:
-            return {}
-        return {"x-guild-id": str(guild_id)}
-
-    @staticmethod
-    def _attach_guild_id_to_stream_url(api_base_url: str, stream_url: str, guild_id: int | None) -> str:
-        if guild_id is None:
-            return stream_url
-
-        try:
-            parsed_stream = urlparse(stream_url)
-            parsed_api = urlparse(api_base_url)
-        except ValueError:
-            return stream_url
-
-        if not parsed_stream.netloc or parsed_stream.netloc != parsed_api.netloc:
-            return stream_url
-        if not parsed_stream.path.startswith("/stream/"):
-            return stream_url
-
-        query_pairs = parse_qsl(parsed_stream.query, keep_blank_values=True)
-        filtered_pairs = [(key, value) for key, value in query_pairs if key != "guild_id"]
-        filtered_pairs.append(("guild_id", str(guild_id)))
-        updated_query = urlencode(filtered_pairs, doseq=True)
-        return urlunparse(parsed_stream._replace(query=updated_query))
-
-    @staticmethod
-    def _friendly_ytdls_error(
-        status_code: int,
-        payload: str,
-        *,
-        upstream_status_code: int | None = None,
-    ) -> str:
-        lowered = payload.lower()
-        effective_upstream_status = upstream_status_code
-        if effective_upstream_status is None:
-            effective_upstream_status = MusicCog._extract_upstream_status_code(payload)
-
-        if "anti-bot" in lowered or "cookies" in lowered or "not a bot" in lowered:
-            return (
-                "A API de yt-dl recusou esta faixa por verificação anti-bot/cookies. "
-                "Renove os cookies da API e tente novamente."
-            )
-        if effective_upstream_status == 403:
-            return (
-                "A origem do stream respondeu 403 mesmo após retentativa automática da API. "
-                "Tente novamente em instantes."
-            )
-        if "expirada" in lowered or "expired" in lowered:
-            return "A URL de stream expirou. Recarregue a faixa e tente novamente."
-        if status_code == 401:
-            return "A API de yt-dl retornou 401 (acesso ao stream inválido/expirado)."
-        if status_code == 429:
-            return "A API de yt-dl está com fila cheia no momento. Tente novamente em instantes."
-        if status_code == 413:
-            return "A API de yt-dl bloqueou porque o arquivo ultrapassa o limite permitido."
-        return f"A API de yt-dl retornou erro {status_code}. Tente novamente."
-
-    @staticmethod
-    def _cleanup_track_file(track: MusicTrack) -> None:
-        cleanup_path = track.cleanup_path
-        if not cleanup_path:
-            return
-        try:
-            if os.path.exists(cleanup_path):
-                os.remove(cleanup_path)
-        except OSError:
-            LOGGER.warning("Falha ao remover arquivo temporário de música: %s", cleanup_path)
-
-    def _dependency_issues(self) -> list[str]:
-        issues: list[str] = []
-        if yt_dlp is None and not self._ytdls_api_base_url():
-            issues.append("Dependência ausente: instale `yt-dlp` (`pip install yt-dlp`).")
-        if nacl is None:
-            issues.append("Dependência ausente: instale `PyNaCl` (`pip install PyNaCl`).")
-        if discord.version_info >= (2, 7, 0) and davey is None:
-            issues.append("Dependência ausente: instale `davey` (`pip install davey`).")
-
-        ffmpeg_binary = self._ffmpeg_binary()
-        ffmpeg_path = shutil.which(ffmpeg_binary)
-        if ffmpeg_path is None:
-            issues.append(
-                f"FFmpeg não encontrado. Instale o binário e/ou defina `FFMPEG_BINARY` (atual: `{ffmpeg_binary}`)."
-            )
-        return issues
-
-    @staticmethod
-    def _extract_track_sync(query: str) -> MusicTrack:
-        if yt_dlp is None:
-            raise RuntimeError("yt-dlp não está disponível.")
-
-        source_query = query if URL_RE.match(query.strip()) else f"ytsearch1:{query}"
-
-        try:
-            with yt_dlp.YoutubeDL(YTDLP_OPTIONS) as ydl:
-                info = ydl.extract_info(source_query, download=False)
-        except Exception as exc:
-            lowered = str(exc).lower()
-            if "sign in to confirm" in lowered or "use --cookies" in lowered:
-                raise RuntimeError(
-                    "YouTube bloqueou esta faixa por anti-bot. Use a API de yt-dl com cookies para reproduzir."
-                ) from exc
-            raise
-
-        if info is None:
-            raise RuntimeError("Nenhum resultado encontrado.")
-
-        if "entries" in info:
-            entries = info.get("entries") or []
-            info = next((entry for entry in entries if entry), None)
-            if info is None:
-                raise RuntimeError("Nenhum resultado encontrado para a busca.")
-
-        stream_url = info.get("url")
-        if not stream_url:
-            raise RuntimeError("Não foi possível obter stream de áudio para essa faixa.")
-
-        title = str(info.get("title") or "Faixa desconhecida")
-        webpage_url = str(info.get("webpage_url") or info.get("original_url") or query)
-        duration = info.get("duration")
-        duration_seconds = int(duration) if isinstance(duration, (int, float)) and duration > 0 else None
-        thumbnail_url = info.get("thumbnail")
-        safe_thumbnail = str(thumbnail_url) if isinstance(thumbnail_url, str) else None
-        uploader_name = (
-            str(info.get("uploader")).strip()
-            if isinstance(info.get("uploader"), str) and str(info.get("uploader")).strip()
-            else None
-        ) or (
-            str(info.get("channel")).strip()
-            if isinstance(info.get("channel"), str) and str(info.get("channel")).strip()
-            else None
-        )
-        source_name = MusicCog._normalize_source_name(
-            str(info.get("extractor_key")).strip()
-            if isinstance(info.get("extractor_key"), str) and str(info.get("extractor_key")).strip()
-            else None
-        )
-        view_count = MusicCog._parse_positive_int(info.get("view_count"))
-
-        return MusicTrack(
-            title=title,
-            stream_url=str(stream_url),
-            webpage_url=webpage_url,
-            requester_id=0,
-            duration_seconds=duration_seconds,
-            thumbnail_url=safe_thumbnail,
-            uploader_name=uploader_name,
-            source_name=source_name,
-            view_count=view_count,
-        )
-
-    @staticmethod
-    def _select_thumbnail(*sources: object) -> str | None:
-        for source in sources:
-            if not isinstance(source, dict):
-                continue
-            thumbnail = source.get("thumbnail")
-            if isinstance(thumbnail, str) and thumbnail.strip():
-                return thumbnail.strip()
-            thumbnails = source.get("thumbnails")
-            if not isinstance(thumbnails, list):
-                continue
-            for item in thumbnails:
-                if isinstance(item, dict):
-                    url = item.get("url")
-                    if isinstance(url, str) and url.strip():
-                        return url.strip()
-                elif isinstance(item, str) and item.strip():
-                    return item.strip()
-        return None
-
-    @staticmethod
-    def _parse_duration_seconds(value: object) -> int | None:
-        if isinstance(value, bool):
-            return None
-        if isinstance(value, (int, float)):
-            duration = int(value)
-            return duration if duration > 0 else None
-        if isinstance(value, str):
-            raw = value.strip()
-            if raw.isdigit():
-                duration = int(raw)
-                return duration if duration > 0 else None
-        return None
-
-    @staticmethod
-    def _parse_positive_int(value: object) -> int | None:
-        if isinstance(value, bool):
-            return None
-        if isinstance(value, int):
-            return value if value >= 0 else None
-        if isinstance(value, float):
-            parsed = int(value)
-            return parsed if parsed >= 0 else None
-        if isinstance(value, str):
-            raw = value.strip()
-            if raw.isdigit():
-                return int(raw)
-        return None
-
-    @staticmethod
-    def _select_first_string(keys: tuple[str, ...], *sources: object) -> str | None:
-        for source in sources:
-            if not isinstance(source, dict):
-                continue
-            for key in keys:
-                value = source.get(key)
-                if isinstance(value, str) and value.strip():
-                    return value.strip()
-        return None
-
-    @staticmethod
-    def _normalize_source_name(value: str | None) -> str | None:
-        if value is None:
-            return None
-        lowered = value.strip().lower()
-        if not lowered:
-            return None
-        if lowered == "youtube":
-            return "YouTube"
-        if lowered == "soundcloud":
-            return "SoundCloud"
-        return value.strip()
-
-    @staticmethod
-    def _parse_expires_at_ms(value: object) -> int | None:
-        if isinstance(value, bool):
-            return None
-
-        expires: int | None
-        if isinstance(value, (int, float)):
-            expires = int(value)
-        elif isinstance(value, str):
-            raw = value.strip()
-            if not raw:
-                return None
-            if "." in raw:
-                try:
-                    expires = int(float(raw))
-                except ValueError:
-                    return None
-            elif raw.isdigit():
-                expires = int(raw)
-            else:
-                return None
-        else:
-            return None
-
-        if expires <= 0:
-            return None
-        if expires < 10_000_000_000:
-            return expires * 1000
-        return expires
-
-    @staticmethod
-    def _build_absolute_url(api_base_url: str, value: object) -> str | None:
-        if not isinstance(value, str):
-            return None
-        raw = value.strip()
-        if not raw:
-            return None
-        if raw.startswith(("http://", "https://")):
-            return raw
-        return urljoin(f"{api_base_url}/", raw.lstrip("/"))
-
-    @staticmethod
-    def _extract_search_result(payload: object) -> dict[str, object] | None:
-        if not isinstance(payload, dict):
-            return None
-        result = payload.get("resultado")
-        if isinstance(result, dict):
-            return result
-        if isinstance(result, list):
-            first = next((item for item in result if isinstance(item, dict)), None)
-            if first is not None:
-                return first
-        return None
-
-    @staticmethod
-    def _extract_link_from_result(result: dict[str, object]) -> str:
-        for key in ("url", "link", "webpage_url"):
-            value = result.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        video_id = result.get("id")
-        if isinstance(video_id, str) and video_id.strip():
-            return f"https://www.youtube.com/watch?v={video_id.strip()}"
-        return ""
-
-    async def _search_track_via_ytdls_api(
-        self,
-        session: aiohttp.ClientSession,
-        api_base_url: str,
-        query: str,
-        *,
-        guild_id: int | None = None,
-    ) -> dict[str, object]:
-        async with session.get(
-            f"{api_base_url}/search",
-            params={"q": query},
-            headers=self._ytdls_request_headers(guild_id),
-        ) as response:
-            payload_text = await response.text()
-            if response.status != 200:
-                payload_json = self._parse_json_object(payload_text)
-                raise RuntimeError(
-                    self._friendly_ytdls_error(
-                        status_code=response.status,
-                        payload=payload_text,
-                        upstream_status_code=self._extract_upstream_status_code(payload_text, payload_json),
-                    )
-                )
-            try:
-                payload = await response.json(content_type=None)
-            except Exception as exc:
-                raise RuntimeError("A API de yt-dl retornou resposta inválida em /search.") from exc
-
-        if isinstance(payload, dict) and payload.get("sucesso") is False:
-            message = payload.get("mensagem")
-            if isinstance(message, str) and message.strip():
-                raise RuntimeError(message.strip())
-        result = self._extract_search_result(payload)
-        if result is None:
-            raise RuntimeError("A API de yt-dl não encontrou resultados para esta busca.")
-        return result
-
-    async def _resolve_track_via_ytdls_api(
-        self,
-        session: aiohttp.ClientSession,
-        api_base_url: str,
-        link: str,
-        *,
-        guild_id: int | None = None,
-    ) -> dict[str, object]:
-        payload_attempts = ({"link": link}, {"url": link}, {"query": link})
-        last_error: RuntimeError | None = None
-
-        for index, payload in enumerate(payload_attempts):
-            async with session.post(
-                f"{api_base_url}/resolve",
-                json=payload,
-                headers=self._ytdls_request_headers(guild_id),
-            ) as response:
-                payload_text = await response.text()
-                if response.status == 404:
-                    last_error = RuntimeError("A API de yt-dl não expõe o endpoint /resolve.")
-                    continue
-                if response.status != 200:
-                    lowered = payload_text.lower()
-                    is_missing_link_payload = (
-                        response.status == 400
-                        and "link" in lowered
-                        and ("obrigatorio" in lowered or "obrigatório" in lowered or "required" in lowered)
-                    )
-                    if is_missing_link_payload and index + 1 < len(payload_attempts):
-                        continue
-                    payload_json = self._parse_json_object(payload_text)
-                    raise RuntimeError(
-                        self._friendly_ytdls_error(
-                            status_code=response.status,
-                            payload=payload_text,
-                            upstream_status_code=self._extract_upstream_status_code(payload_text, payload_json),
-                        )
-                    )
-                try:
-                    payload_json = await response.json(content_type=None)
-                except Exception as exc:
-                    raise RuntimeError("A API de yt-dl retornou resposta inválida em /resolve.") from exc
-                if not isinstance(payload_json, dict):
-                    raise RuntimeError("A API de yt-dl retornou payload inválido em /resolve.")
-                return payload_json
-
-        if last_error is not None:
-            raise last_error
-        raise RuntimeError("A API de yt-dl não retornou dados em /resolve.")
-
-    def _track_from_resolve_payload(
-        self,
-        *,
-        api_base_url: str,
-        resolve_payload: dict[str, object],
-        search_result: dict[str, object],
-        link: str,
-        requester_id: int,
-        guild_id: int | None = None,
-    ) -> MusicTrack:
-        if resolve_payload.get("sucesso") is False:
-            message = resolve_payload.get("mensagem")
-            if isinstance(message, str) and message.strip():
-                raise RuntimeError(message.strip())
-            raise RuntimeError("A API de yt-dl falhou ao resolver esta faixa.")
-
-        resolve_data = resolve_payload.get("resultado")
-        if isinstance(resolve_data, dict):
-            payload_data = resolve_data
-        else:
-            payload_data = resolve_payload
-
-        stream_url = self._build_absolute_url(api_base_url, payload_data.get("stream_url"))
-        if not stream_url:
-            stream_url = self._build_absolute_url(api_base_url, payload_data.get("url"))
-        if not stream_url:
-            raise RuntimeError("A API de yt-dl não retornou `stream_url` válido em /resolve.")
-        stream_url = self._attach_guild_id_to_stream_url(api_base_url, stream_url, guild_id)
-
-        title = payload_data.get("title")
-        if not isinstance(title, str) or not title.strip():
-            title = search_result.get("title")
-        safe_title = str(title).strip() if isinstance(title, str) and title.strip() else "Faixa desconhecida"
-
-        track_id_value = payload_data.get("track_id")
-        track_id = str(track_id_value).strip() if isinstance(track_id_value, str) and track_id_value.strip() else None
-
-        duration_seconds = self._parse_duration_seconds(payload_data.get("duration"))
-        if duration_seconds is None:
-            duration_seconds = self._parse_duration_seconds(search_result.get("duration"))
-        uploader_name = self._select_first_string(("uploader", "channel"), payload_data, search_result)
-        source_name = self._normalize_source_name(
-            self._select_first_string(("ie_key", "extractor_key", "source"), payload_data, search_result)
-        )
-        view_count = self._parse_positive_int(payload_data.get("view_count"))
-        if view_count is None:
-            view_count = self._parse_positive_int(search_result.get("view_count"))
-
-        return MusicTrack(
-            title=safe_title,
-            stream_url=stream_url,
-            webpage_url=link,
-            requester_id=requester_id,
-            guild_id=guild_id,
-            duration_seconds=duration_seconds,
-            thumbnail_url=self._select_thumbnail(payload_data, search_result),
-            track_id=track_id,
-            stream_expires_at_ms=self._parse_expires_at_ms(payload_data.get("expires_at")),
-            uploader_name=uploader_name,
-            source_name=source_name,
-            view_count=view_count,
-        )
-
-    async def _extract_track_via_ytdls_api(
-        self,
-        api_base_url: str,
-        query: str,
-        requester_id: int,
-        guild_id: int | None = None,
-    ) -> MusicTrack:
-        timeout = aiohttp.ClientTimeout(total=240, connect=20, sock_read=240)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            search_result = await self._search_track_via_ytdls_api(
-                session,
-                api_base_url,
-                query,
-                guild_id=guild_id,
-            )
-            link = self._extract_link_from_result(search_result)
-            if not link:
-                raise RuntimeError("A API de yt-dl não retornou URL válida para esta faixa.")
-            resolve_payload = await self._resolve_track_via_ytdls_api(
-                session,
-                api_base_url=api_base_url,
-                link=link,
-                guild_id=guild_id,
-            )
-            return self._track_from_resolve_payload(
-                api_base_url=api_base_url,
-                resolve_payload=resolve_payload,
-                search_result=search_result,
-                link=link,
-                requester_id=requester_id,
-                guild_id=guild_id,
-            )
-
-    async def _extract_track(self, query: str, requester_id: int, guild_id: int | None = None) -> MusicTrack:
-        api_base_url = self._ytdls_api_base_url()
-        if api_base_url:
-            try:
-                return await self._extract_track_via_ytdls_api(
-                    api_base_url,
-                    query,
-                    requester_id,
-                    guild_id=guild_id,
-                )
-            except Exception as exc:
-                LOGGER.warning(
-                    "Falha ao extrair faixa via API yt-dl (%s).",
-                    api_base_url,
-                    exc_info=(type(exc), exc, exc.__traceback__),
-                )
-                raise RuntimeError(str(exc)) from exc
-
-        track = await asyncio.to_thread(self._extract_track_sync, query)
-        track.requester_id = requester_id
-        track.guild_id = guild_id
-        return track
-
-    def _build_source(self, track: MusicTrack, *, volume: float) -> discord.PCMVolumeTransformer:
-        ffmpeg_binary = self._ffmpeg_binary()
-        audio_source = discord.FFmpegPCMAudio(
-            track.stream_url,
-            executable=ffmpeg_binary,
-            before_options=FFMPEG_BEFORE_OPTIONS,
-            options=FFMPEG_OPTIONS,
-        )
-        return discord.PCMVolumeTransformer(audio_source, volume=max(0.0, min(volume, 2.0)))
-
-    @staticmethod
-    def _now_ms() -> int:
-        return int(time.time() * 1000)
-
-    async def _refresh_stream_url_if_needed(self, track: MusicTrack, *, force: bool = False) -> bool:
-        if track.cleanup_path is not None:
-            return False
-        if not force:
-            if not track.stream_expires_at_ms:
-                return False
-            expires_at_ms = track.stream_expires_at_ms
-            if expires_at_ms - self._now_ms() > 30_000:
-                return False
-
-        api_base_url = self._ytdls_api_base_url()
-        if not api_base_url:
-            return False
-        if not self._is_url(track.webpage_url):
-            return False
-
-        timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=30)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            resolve_payload = await self._resolve_track_via_ytdls_api(
-                session,
-                api_base_url,
-                track.webpage_url,
-                guild_id=track.guild_id,
-            )
-
-        refreshed_track = self._track_from_resolve_payload(
-            api_base_url=api_base_url,
-            resolve_payload=resolve_payload,
-            search_result={
-                "title": track.title,
-                "duration": track.duration_seconds,
-                "thumbnail": track.thumbnail_url,
-                "uploader": track.uploader_name,
-                "source": track.source_name,
-                "view_count": track.view_count,
-            },
-            link=track.webpage_url,
-            requester_id=track.requester_id,
-            guild_id=track.guild_id,
-        )
-        track.stream_url = refreshed_track.stream_url
-        track.stream_expires_at_ms = refreshed_track.stream_expires_at_ms
-        if refreshed_track.track_id:
-            track.track_id = refreshed_track.track_id
-        track.uploader_name = refreshed_track.uploader_name or track.uploader_name
-        track.source_name = refreshed_track.source_name or track.source_name
-        track.view_count = refreshed_track.view_count if refreshed_track.view_count is not None else track.view_count
-        return True
-
-    async def _probe_stream_url(self, stream_url: str) -> None:
-        timeout = aiohttp.ClientTimeout(total=12, connect=5, sock_read=10)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(stream_url, headers={"Range": "bytes=0-1"}) as response:
-                if response.status in (200, 206):
-                    return
-                body = (await response.text()).strip()
-                compact_body = " ".join(body.split())
-                if len(compact_body) > 180:
-                    compact_body = compact_body[:180] + "..."
-                detail = f" | {compact_body}" if compact_body else ""
-                raise RuntimeError(f"HTTP {response.status} ao validar stream{detail}")
-
-    async def _ensure_track_stream_ready(self, track: MusicTrack) -> None:
-        if track.cleanup_path is not None:
-            return
-        if not self._ytdls_api_base_url():
-            return
-
-        try:
-            await self._probe_stream_url(track.stream_url)
-            return
-        except Exception as initial_exc:
-            LOGGER.info("Probe inicial falhou para `%s`: %s", track.title, initial_exc)
-
-        # Se o track_id foi invalidado (404/not found) ou upstream retornou 403/502,
-        # pedimos um /resolve novo para obter stream_url fresco e tentamos de novo.
-        await self._refresh_stream_url_if_needed(track, force=True)
-        await self._probe_stream_url(track.stream_url)
-
-    async def _prefetch_track_ids(
-        self,
-        api_base_url: str,
-        track_ids: list[str],
-        *,
-        guild_id: int | None = None,
-    ) -> bool:
-        if not track_ids:
+    def _node_is_connected(node: object) -> bool:
+        status = getattr(node, "status", None)
+        if status is None:
+            # Some versions don't expose status cleanly. If we have a node object,
+            # consider it usable and let runtime operations validate it.
             return True
 
-        timeout = aiohttp.ClientTimeout(total=25, connect=8, sock_read=25)
-        payload_variants = ({"track_ids": track_ids}, {"tracks": track_ids})
+        status_name = getattr(status, "name", str(status))
+        return str(status_name).upper() == "CONNECTED"
 
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            for index, payload in enumerate(payload_variants):
-                async with session.post(
-                    f"{api_base_url}/prefetch",
-                    json=payload,
-                    headers=self._ytdls_request_headers(guild_id),
-                ) as response:
-                    if response.status in (200, 202):
-                        return True
-                    body = await response.text()
-                    if response.status == 404:
-                        return False
-                    lowered = body.lower()
-                    if response.status == 400 and index + 1 < len(payload_variants):
-                        if "track_ids" in lowered or "tracks" in lowered:
-                            continue
-                    LOGGER.info("Prefetch ignorado na API yt-dl (%s): HTTP %s", api_base_url, response.status)
-                    return False
-        return False
+    async def _ensure_lavalink_node(self) -> bool:
+        if wavelink is None:
+            return False
 
-    async def _prefetch_queue_for_player(self, player: GuildMusicPlayer) -> None:
-        api_base_url = self._ytdls_api_base_url()
-        if not api_base_url:
-            return
-
-        async with player.queue_lock:
-            track_ids: list[str] = []
-            for queued_track in list(player.queue)[:5]:
-                track_id = queued_track.track_id.strip() if isinstance(queued_track.track_id, str) else ""
-                if not track_id or track_id in player.prefetched_track_ids:
-                    continue
-                track_ids.append(track_id)
-                player.prefetched_track_ids.add(track_id)
-
-        if not track_ids:
-            return
         try:
-            prefetched = await self._prefetch_track_ids(
-                api_base_url,
-                track_ids,
-                guild_id=player.guild_id,
-            )
-            if prefetched:
-                return
-            async with player.queue_lock:
-                for track_id in track_ids:
-                    player.prefetched_track_ids.discard(track_id)
+            existing = wavelink.Pool.get_node()
+        except Exception:
+            existing = None
+
+        if existing is not None and self._node_is_connected(existing):
+            return True
+
+        uri = self._lavalink_uri()
+        password = self._lavalink_password()
+        if not uri or not password:
+            return False
+
+        identifier = os.getenv("LAVALINK_NODE_ID", "ayana-node").strip() or "ayana-node"
+        nodes = [wavelink.Node(identifier=identifier, uri=uri, password=password)]
+
+        cache_capacity_raw = os.getenv("LAVALINK_CACHE_CAPACITY", "100")
+        try:
+            cache_capacity = max(0, int(cache_capacity_raw))
+        except ValueError:
+            cache_capacity = 100
+
+        try:
+            await wavelink.Pool.connect(nodes=nodes, client=self.bot, cache_capacity=cache_capacity)
         except Exception as exc:
-            LOGGER.info("Falha no prefetch de faixas da guild %s: %s", player.guild_id, exc)
-            async with player.queue_lock:
-                for track_id in track_ids:
-                    player.prefetched_track_ids.discard(track_id)
+            LOGGER.warning(
+                "Falha ao conectar no Lavalink (%s).",
+                uri,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
 
-    def _schedule_prefetch(self, player: GuildMusicPlayer) -> None:
-        if not self._prefetch_enabled():
-            return
-        if player.prefetch_task and not player.prefetch_task.done():
-            return
-        player.prefetch_task = asyncio.create_task(
-            self._prefetch_queue_for_player(player),
-            name=f"music-prefetch-{player.guild_id}",
-        )
+        try:
+            node = wavelink.Pool.get_node()
+        except Exception:
+            return False
 
-    def _get_player(self, guild_id: int) -> GuildMusicPlayer:
-        player = self._players.get(guild_id)
-        if player is None:
-            player = GuildMusicPlayer(guild_id=guild_id)
-            self._players[guild_id] = player
-        return player
+        return self._node_is_connected(node)
 
-    async def _wait_for_next_track(self, player: GuildMusicPlayer) -> MusicTrack:
-        while True:
-            async with player.queue_lock:
-                if player.queue:
-                    return player.queue.popleft()
-                player.queue_event.clear()
-            await asyncio.wait_for(player.queue_event.wait(), timeout=IDLE_TIMEOUT_SECONDS)
+    def _get_state(self, guild_id: int) -> GuildMusicState:
+        state = self._states.get(guild_id)
+        if state is None:
+            state = GuildMusicState(guild_id=guild_id)
+            self._states[guild_id] = state
+        return state
 
-    async def _queue_snapshot(self, player: GuildMusicPlayer) -> list[MusicTrack]:
-        async with player.queue_lock:
-            return list(player.queue)
-
-    async def _clear_queue(self, player: GuildMusicPlayer) -> int:
-        queued_tracks: list[MusicTrack]
-        async with player.queue_lock:
-            queued_tracks = list(player.queue)
-            count = len(queued_tracks)
-            player.queue.clear()
-            player.queue_event.clear()
-            player.prefetched_track_ids.clear()
-        for track in queued_tracks:
-            self._cleanup_track_file(track)
-        return count
+    def _cancel_idle_task(self, state: GuildMusicState) -> None:
+        if state.idle_task and not state.idle_task.done():
+            state.idle_task.cancel()
+        state.idle_task = None
 
     async def _send_music_message(
         self,
@@ -938,169 +206,201 @@ class MusicCog(commands.Cog):
             return
         if message is None and embed is None:
             return
+
         channel = self.bot.get_channel(channel_id)
         if channel is None:
             return
         if not isinstance(channel, (discord.TextChannel, discord.Thread)):
             return
+
         try:
             await channel.send(content=message, embed=embed)
         except (discord.Forbidden, discord.HTTPException):
             LOGGER.warning("Não consegui enviar mensagem de música no canal %s.", channel_id)
 
-    async def _disconnect_player(self, guild_id: int, *, from_loop: bool = False) -> None:
-        player = self._players.pop(guild_id, None)
-        if player is None:
+    async def _dependency_issues(self, *, require_connected_node: bool = True) -> list[str]:
+        issues: list[str] = []
+
+        if wavelink is None:
+            issues.append("Dependência ausente: instale `wavelink` (`pip install wavelink`).")
+        if nacl is None:
+            issues.append("Dependência ausente: instale `PyNaCl` (`pip install PyNaCl`).")
+        if discord.version_info >= (2, 7, 0) and davey is None:
+            issues.append("Dependência ausente: instale `davey` (`pip install davey`).")
+
+        if not self._lavalink_uri():
+            issues.append("Configuração ausente: defina `LAVALINK_URI`.")
+        if not self._lavalink_password():
+            issues.append("Configuração ausente: defina `LAVALINK_PASSWORD`.")
+
+        if require_connected_node and not issues:
+            connected = await self._ensure_lavalink_node()
+            if not connected:
+                issues.append(
+                    "Não consegui conectar no Lavalink. Verifique `LAVALINK_URI`, `LAVALINK_PASSWORD` e o servidor."
+                )
+
+        return issues
+
+    @staticmethod
+    def _track_requester_id(track: object) -> int | None:
+        extras = getattr(track, "extras", None)
+        candidate: object | None = None
+
+        if isinstance(extras, dict):
+            candidate = extras.get("requester_id")
+        else:
+            candidate = getattr(extras, "requester_id", None)
+            if candidate is None:
+                getter = getattr(extras, "get", None)
+                if callable(getter):
+                    candidate = getter("requester_id")
+
+        if isinstance(candidate, bool):
+            return None
+        if isinstance(candidate, int):
+            return candidate
+        if isinstance(candidate, float):
+            return int(candidate)
+        if isinstance(candidate, str) and candidate.strip().isdigit():
+            return int(candidate.strip())
+        return None
+
+    @staticmethod
+    def _set_track_requester_id(track: object, requester_id: int) -> None:
+        try:
+            setattr(track, "extras", {"requester_id": requester_id})
             return
+        except Exception:
+            pass
 
-        if player.prefetch_task and not player.prefetch_task.done():
-            player.prefetch_task.cancel()
+        extras = getattr(track, "extras", None)
+        if isinstance(extras, dict):
+            extras["requester_id"] = requester_id
 
-        await self._clear_queue(player)
-        if player.current is not None:
-            self._cleanup_track_file(player.current)
-        player.current = None
-        player.next_track_event.set()
+    def _build_track_embed(
+        self,
+        track: object,
+        *,
+        header: str,
+        queue_position: int | None = None,
+    ) -> discord.Embed:
+        title = str(getattr(track, "title", "Faixa desconhecida") or "Faixa desconhecida")
+        uri_value = getattr(track, "uri", None)
+        uri = str(uri_value).strip() if isinstance(uri_value, str) and uri_value.strip() else None
 
-        voice_client = player.voice_client
-        if voice_client and voice_client.is_connected():
+        description = f"[{title}]({uri})" if self._is_url(uri) else title
+        embed = discord.Embed(title=header, description=description, color=discord.Color.blurple())
+
+        length = getattr(track, "length", None)
+        duration_ms = int(length) if isinstance(length, (int, float)) else None
+        embed.add_field(name="Duração", value=f"`{self._format_duration_ms(duration_ms)}`", inline=True)
+
+        requester_id = self._track_requester_id(track)
+        if requester_id is not None:
+            embed.add_field(name="Pedido por", value=f"<@{requester_id}>", inline=True)
+
+        if queue_position is not None:
+            embed.add_field(name="Posição", value=f"`{queue_position}`", inline=True)
+
+        author = getattr(track, "author", None)
+        if isinstance(author, str) and author.strip():
+            embed.add_field(name="Canal", value=author.strip(), inline=True)
+
+        source = getattr(track, "source", None)
+        if source is not None:
+            source_name = getattr(source, "name", str(source))
+            normalized_source = str(source_name).strip()
+            if normalized_source:
+                embed.add_field(name="Fonte", value=normalized_source, inline=True)
+
+        identifier = getattr(track, "identifier", None)
+        if isinstance(identifier, str) and identifier.strip():
+            embed.set_footer(text=f"track_id: {identifier.strip()}")
+
+        artwork = getattr(track, "artwork", None)
+        artwork_url = str(artwork).strip() if artwork is not None else ""
+        if self._is_url(artwork_url):
+            embed.set_thumbnail(url=artwork_url)
+
+        return embed
+
+    @staticmethod
+    def _queue_length(queue: object) -> int:
+        count = getattr(queue, "count", None)
+        if isinstance(count, int):
+            return count
+
+        try:
+            return len(queue)  # type: ignore[arg-type]
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _queue_items(queue: object) -> list[object]:
+        try:
+            return list(queue)  # type: ignore[arg-type]
+        except Exception:
+            return []
+
+    def _schedule_idle_disconnect(self, player: "wavelink.Player") -> None:
+        guild = player.guild
+        state = self._get_state(guild.id)
+        self._cancel_idle_task(state)
+
+        async def idle_disconnect_task() -> None:
             try:
-                await voice_client.disconnect(force=True)
-            except (discord.Forbidden, discord.HTTPException):
-                LOGGER.warning("Falha ao desconectar voice na guild %s.", guild_id)
+                await asyncio.sleep(IDLE_TIMEOUT_SECONDS)
 
-        if from_loop:
-            return
+                if not player.connected:
+                    return
+                if player.playing or player.paused:
+                    return
+                if not player.queue.is_empty:
+                    return
 
-        if player.loop_task and not player.loop_task.done():
-            player.loop_task.cancel()
-            try:
-                await player.loop_task
-            except asyncio.CancelledError:
-                pass
-
-    def _start_loop_if_needed(self, player: GuildMusicPlayer) -> None:
-        if player.loop_task and not player.loop_task.done():
-            return
-        player.loop_task = asyncio.create_task(self._player_loop(player), name=f"music-player-{player.guild_id}")
-
-    async def _player_loop(self, player: GuildMusicPlayer) -> None:
-        while True:
-            try:
-                track = await self._wait_for_next_track(player)
-            except asyncio.TimeoutError:
                 await self._send_music_message(
-                    player.announce_channel_id,
+                    state.announce_channel_id,
                     "Fila vazia por 5 minutos. Saindo do canal de voz.",
                 )
-                await self._disconnect_player(player.guild_id, from_loop=True)
-                return
+                await player.disconnect()
             except asyncio.CancelledError:
                 return
-
-            if isinstance(track.track_id, str) and track.track_id:
-                player.prefetched_track_ids.discard(track.track_id)
-            self._schedule_prefetch(player)
-
-            voice_client = player.voice_client
-            if voice_client is None or not voice_client.is_connected():
-                await self._send_music_message(
-                    player.announce_channel_id,
-                    "Perdi conexão com o canal de voz. Use `/music join` e `/music play` novamente.",
-                )
-                await self._disconnect_player(player.guild_id, from_loop=True)
-                return
-
-            player.current = track
-            player.last_play_error = None
-            player.next_track_event.clear()
-
-            try:
-                await self._refresh_stream_url_if_needed(track)
-                await self._ensure_track_stream_ready(track)
             except Exception as exc:
                 LOGGER.warning(
-                    "Stream indisponível para `%s` na guild %s.",
-                    track.title,
-                    player.guild_id,
+                    "Falha ao desconectar por inatividade na guild %s.",
+                    guild.id,
                     exc_info=(type(exc), exc, exc.__traceback__),
                 )
-                await self._send_music_message(
-                    player.announce_channel_id,
-                    f"Falha ao validar stream de `{track.title}`. Pulando para a próxima.",
-                )
-                self._cleanup_track_file(track)
-                player.current = None
-                continue
 
-            try:
-                source = self._build_source(track, volume=player.volume)
-            except Exception as exc:
-                LOGGER.warning(
-                    "Falha ao preparar fonte de áudio para %s na guild %s.",
-                    track.title,
-                    player.guild_id,
-                    exc_info=(type(exc), exc, exc.__traceback__),
-                )
-                await self._send_music_message(
-                    player.announce_channel_id,
-                    f"Não consegui reproduzir `{track.title}`. Pulando para a próxima.",
-                )
-                self._cleanup_track_file(track)
-                player.current = None
-                continue
+        state.idle_task = asyncio.create_task(
+            idle_disconnect_task(),
+            name=f"music-idle-disconnect-{guild.id}",
+        )
 
-            def _after_play(error: Exception | None) -> None:
-                self.bot.loop.call_soon_threadsafe(self._on_after_play, player.guild_id, error)
+    async def _play_next(self, player: "wavelink.Player") -> bool:
+        if player.queue.is_empty:
+            self._schedule_idle_disconnect(player)
+            return False
 
-            try:
-                voice_client.play(source, after=_after_play)
-            except Exception as exc:
-                LOGGER.warning(
-                    "Falha ao iniciar reprodução na guild %s.",
-                    player.guild_id,
-                    exc_info=(type(exc), exc, exc.__traceback__),
-                )
-                await self._send_music_message(
-                    player.announce_channel_id,
-                    f"Não consegui iniciar `{track.title}`. Pulando para a próxima.",
-                )
-                self._cleanup_track_file(track)
-                player.current = None
-                continue
+        try:
+            next_track = player.queue.get()
+        except Exception:
+            self._schedule_idle_disconnect(player)
+            return False
 
-            now_playing_embed = self._build_track_embed(track, header="Tocando Agora")
-            await self._send_music_message(
-                player.announce_channel_id,
-                "Reprodução iniciada.",
-                embed=now_playing_embed,
-            )
-
-            await player.next_track_event.wait()
-            if player.last_play_error is not None:
-                LOGGER.warning(
-                    "Erro durante reprodução na guild %s: %s",
-                    player.guild_id,
-                    player.last_play_error,
-                )
-            self._cleanup_track_file(track)
-            player.current = None
-            self._schedule_prefetch(player)
-
-    def _on_after_play(self, guild_id: int, error: Exception | None) -> None:
-        player = self._players.get(guild_id)
-        if player is None:
-            return
-        if error is not None:
-            player.last_play_error = error
-        player.next_track_event.set()
+        await player.play(next_track)
+        return True
 
     async def _connect_to_member_channel(
         self,
         guild: discord.Guild,
         member: discord.Member,
-        player: GuildMusicPlayer,
-    ) -> discord.VoiceClient:
+        state: GuildMusicState,
+    ) -> "wavelink.Player":
+        if wavelink is None:
+            raise RuntimeError("Dependência `wavelink` não está instalada.")
+
         if member.voice is None or member.voice.channel is None:
             raise RuntimeError("Entre em um canal de voz antes de usar comandos de música.")
 
@@ -1113,21 +413,36 @@ class MusicCog(commands.Cog):
                 raise RuntimeError("O canal de voz está lotado. Libere uma vaga e tente novamente.")
 
         voice_client = guild.voice_client
-        if voice_client and voice_client.is_connected():
-            if voice_client.channel != target_channel:
-                await voice_client.move_to(target_channel)
-        else:
-            # Fail fast on gateway handshake errors to avoid visible join/leave loops.
-            voice_client = await target_channel.connect(self_deaf=True, reconnect=False, timeout=20.0)
+        if voice_client and not isinstance(voice_client, wavelink.Player):
+            raise RuntimeError("Já existe outro cliente de voz ativo neste servidor. Desconecte-o e tente novamente.")
 
-        player.voice_client = voice_client
-        return voice_client
+        if voice_client and isinstance(voice_client, wavelink.Player) and voice_client.connected:
+            player = voice_client
+            if player.channel != target_channel:
+                await player.move_to(target_channel)
+        else:
+            player = await target_channel.connect(cls=wavelink.Player, self_deaf=True)
+
+        if hasattr(player, "autoplay") and hasattr(wavelink, "AutoPlayMode"):
+            try:
+                player.autoplay = wavelink.AutoPlayMode.disabled
+            except Exception:
+                pass
+
+        current_volume = getattr(player, "volume", 0)
+        if not isinstance(current_volume, (int, float)) or current_volume <= 0:
+            try:
+                await player.set_volume(DEFAULT_VOLUME_PERCENT)
+            except Exception:
+                pass
+
+        self._cancel_idle_task(state)
+        return player
 
     @staticmethod
-    def _can_control(member: discord.Member, player: GuildMusicPlayer) -> tuple[bool, str | None]:
+    def _can_control(member: discord.Member, player: "wavelink.Player") -> tuple[bool, str | None]:
         user_channel = member.voice.channel if member.voice else None
-        voice_client = player.voice_client
-        bot_channel = voice_client.channel if voice_client else None
+        bot_channel = player.channel
 
         if user_channel is None:
             return False, "Entre no canal de voz do bot para controlar a fila."
@@ -1137,43 +452,171 @@ class MusicCog(commands.Cog):
             return False, f"Você precisa estar em **{bot_channel.name}** para controlar a música."
         return True, None
 
+    async def _search_track(self, query: str) -> object:
+        if wavelink is None:
+            raise RuntimeError("Dependência `wavelink` não está instalada.")
+
+        sanitized = query.strip()
+        if not sanitized:
+            raise RuntimeError("Informe uma URL ou termo de busca válido.")
+
+        search_query = sanitized if URL_RE.match(sanitized) else f"ytsearch:{sanitized}"
+        results = await wavelink.Playable.search(search_query)
+        if not results:
+            raise RuntimeError("Nenhum resultado encontrado para a busca.")
+
+        if isinstance(results, wavelink.Playlist):
+            if not results.tracks:
+                raise RuntimeError("Nenhum resultado encontrado para a busca.")
+            return results.tracks[0]
+
+        return results[0]
+
+    @commands.Cog.listener()
+    async def on_wavelink_track_start(self, payload: object) -> None:
+        if wavelink is None:
+            return
+
+        player = getattr(payload, "player", None)
+        if not isinstance(player, wavelink.Player):
+            return
+
+        guild = player.guild
+        state = self._get_state(guild.id)
+        self._cancel_idle_task(state)
+
+        track = getattr(payload, "original", None) or getattr(payload, "track", None)
+        if track is None:
+            return
+
+        await self._send_music_message(
+            state.announce_channel_id,
+            "Reprodução iniciada.",
+            embed=self._build_track_embed(track, header="Tocando Agora"),
+        )
+
+    @commands.Cog.listener()
+    async def on_wavelink_track_end(self, payload: object) -> None:
+        if wavelink is None:
+            return
+
+        player = getattr(payload, "player", None)
+        if not isinstance(player, wavelink.Player):
+            return
+        if not player.connected:
+            return
+
+        try:
+            await self._play_next(player)
+        except Exception as exc:
+            state = self._get_state(player.guild.id)
+            await self._send_music_message(
+                state.announce_channel_id,
+                "Falha ao iniciar a próxima faixa da fila.",
+            )
+            LOGGER.warning(
+                "Falha ao iniciar próxima faixa na guild %s.",
+                player.guild.id,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+
+    @commands.Cog.listener()
+    async def on_wavelink_track_exception(self, payload: object) -> None:
+        if wavelink is None:
+            return
+
+        player = getattr(payload, "player", None)
+        if not isinstance(player, wavelink.Player):
+            return
+
+        state = self._get_state(player.guild.id)
+        await self._send_music_message(
+            state.announce_channel_id,
+            "Falha de reprodução na faixa atual. Tentando a próxima da fila.",
+        )
+
+        try:
+            await self._play_next(player)
+        except Exception:
+            pass
+
+    @commands.Cog.listener()
+    async def on_wavelink_track_stuck(self, payload: object) -> None:
+        if wavelink is None:
+            return
+
+        player = getattr(payload, "player", None)
+        if not isinstance(player, wavelink.Player):
+            return
+
+        state = self._get_state(player.guild.id)
+        await self._send_music_message(
+            state.announce_channel_id,
+            "A faixa travou durante a reprodução. Pulando para a próxima.",
+        )
+
+        try:
+            await self._play_next(player)
+        except Exception:
+            pass
+
     @music.command(
         name="setup",
-        description="Diagnostica dependências de áudio (FFmpeg, yt-dlp, PyNaCl e Davey).",
+        description="Diagnostica dependências de áudio (Lavalink, cookies, PyNaCl e Davey).",
     )
     async def music_setup(self, interaction: discord.Interaction) -> None:
-        issues = self._dependency_issues()
-        ffmpeg_binary = self._ffmpeg_binary()
-        ffmpeg_path = shutil.which(ffmpeg_binary)
-        api_base_url = self._ytdls_api_base_url()
+        issues = await self._dependency_issues(require_connected_node=False)
+        lavalink_connected = await self._ensure_lavalink_node() if wavelink is not None else False
+
+        cookies_path = self._lavalink_cookies_path()
+        cookies_configured = bool(cookies_path)
+        cookies_exists = bool(cookies_path and os.path.exists(cookies_path))
+
         status_lines = [
-            f"yt-dlp: {'OK' if yt_dlp is not None else 'FALHOU'}",
+            f"Wavelink: {'OK' if wavelink is not None else 'FALHOU'}",
             f"PyNaCl: {'OK' if nacl is not None else 'FALHOU'}",
             (
                 f"Davey: {'OK' if davey is not None else 'FALHOU'}"
                 if discord.version_info >= (2, 7, 0)
                 else "Davey: opcional nesta versão do discord.py"
             ),
-            f"YTDLS API: {'ATIVA' if api_base_url else 'DESATIVADA'} ({api_base_url or 'nenhuma'})",
-            f"FFmpeg: {'OK' if ffmpeg_path is not None else 'FALHOU'} ({ffmpeg_path or ffmpeg_binary})",
+            f"Lavalink URI: {self._lavalink_uri() or 'nenhuma'}",
+            f"Lavalink Node: {'ONLINE' if lavalink_connected else 'OFFLINE'}",
+            (
+                f"Cookies: OK ({cookies_path})"
+                if cookies_exists
+                else (
+                    f"Cookies: arquivo não encontrado ({cookies_path})"
+                    if cookies_configured
+                    else "Cookies: não configurado (defina `LAVALINK_COOKIES_PATH`)"
+                )
+            ),
         ]
 
-        if issues:
-            await self._respond(
-                interaction,
-                "Diagnóstico de música:\n"
-                + "\n".join(f"- {line}" for line in status_lines)
-                + "\n\nAjustes necessários:\n"
-                + "\n".join(f"- {issue}" for issue in issues),
-                ephemeral=True,
-            )
+        setup_warnings: list[str] = []
+        if cookies_configured and not cookies_exists:
+            setup_warnings.append("O caminho de cookies informado não existe no host do bot.")
+        if not cookies_configured:
+            setup_warnings.append("Cookies não configurados: defina `LAVALINK_COOKIES_PATH` para reduzir bloqueios anti-bot.")
+        if wavelink is not None and not lavalink_connected:
+            setup_warnings.append("Lavalink offline: verifique se o servidor está ativo e acessível.")
+
+        if issues or setup_warnings:
+            lines = [
+                "Diagnóstico de música:\n" + "\n".join(f"- {line}" for line in status_lines),
+            ]
+            if issues:
+                lines.append("Ajustes obrigatórios:\n" + "\n".join(f"- {issue}" for issue in issues))
+            if setup_warnings:
+                lines.append("Recomendações:\n" + "\n".join(f"- {warning}" for warning in setup_warnings))
+            await self._respond(interaction, "\n\n".join(lines), ephemeral=True)
             return
 
         await self._respond(
             interaction,
             "Diagnóstico de música:\n"
             + "\n".join(f"- {line}" for line in status_lines)
-            + "\n\nTudo pronto para tocar áudio no canal de voz.",
+            + "\n\nTudo pronto para tocar áudio com Lavalink.",
             ephemeral=True,
         )
 
@@ -1187,18 +630,18 @@ class MusicCog(commands.Cog):
             await self._respond(interaction, "Este comando só funciona em servidor.", ephemeral=True)
             return
 
-        issues = self._dependency_issues()
+        issues = await self._dependency_issues(require_connected_node=True)
         if issues:
             await self._respond(interaction, "\n".join(f"- {issue}" for issue in issues), ephemeral=True)
             return
 
         await interaction.response.defer(thinking=True)
 
-        player = self._get_player(guild.id)
-        player.announce_channel_id = interaction.channel_id
+        state = self._get_state(guild.id)
+        state.announce_channel_id = interaction.channel_id
 
         try:
-            voice_client = await self._connect_to_member_channel(guild, member, player)
+            player = await self._connect_to_member_channel(guild, member, state)
         except RuntimeError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return
@@ -1217,8 +660,7 @@ class MusicCog(commands.Cog):
             )
             return
 
-        self._start_loop_if_needed(player)
-        await interaction.followup.send(f"Conectado em **{voice_client.channel.name}**.")
+        await interaction.followup.send(f"Conectado em **{player.channel.name}**.")
 
     @music.command(name="play", description="Adiciona uma música na fila (URL ou busca).")
     @app_commands.guild_only()
@@ -1235,7 +677,7 @@ class MusicCog(commands.Cog):
             await self._respond(interaction, "Este comando só funciona em servidor.", ephemeral=True)
             return
 
-        issues = self._dependency_issues()
+        issues = await self._dependency_issues(require_connected_node=True)
         if issues:
             await self._respond(interaction, "\n".join(f"- {issue}" for issue in issues), ephemeral=True)
             return
@@ -1247,11 +689,11 @@ class MusicCog(commands.Cog):
 
         await interaction.response.defer(thinking=True)
 
-        player = self._get_player(guild.id)
-        player.announce_channel_id = interaction.channel_id
+        state = self._get_state(guild.id)
+        state.announce_channel_id = interaction.channel_id
 
         try:
-            await self._connect_to_member_channel(guild, member, player)
+            player = await self._connect_to_member_channel(guild, member, state)
         except RuntimeError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return
@@ -1270,45 +712,53 @@ class MusicCog(commands.Cog):
             )
             return
 
-        try:
-            track = await self._extract_track(query, member.id, guild.id)
-        except Exception as exc:
-            LOGGER.warning(
-                "Falha ao extrair faixa para /music play na guild %s.",
-                guild.id,
-                exc_info=(type(exc), exc, exc.__traceback__),
-            )
-            message = "Não consegui carregar essa faixa. Tente outra URL ou termo de busca."
-            if isinstance(exc, RuntimeError):
-                detail = str(exc).strip()
-                if detail:
-                    message = detail
+        queue_len = self._queue_length(player.queue)
+        if queue_len >= MAX_QUEUE_ITEMS:
             await interaction.followup.send(
-                message,
+                f"A fila já atingiu o limite de {MAX_QUEUE_ITEMS} faixas.",
                 ephemeral=True,
             )
             return
 
-        async with player.queue_lock:
-            if len(player.queue) >= MAX_QUEUE_ITEMS:
+        try:
+            track = await self._search_track(query)
+        except Exception as exc:
+            LOGGER.warning(
+                "Falha ao buscar faixa para /music play na guild %s.",
+                guild.id,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            message = "Não consegui carregar essa faixa. Tente outra URL ou termo de busca."
+            detail = str(exc).strip()
+            if detail:
+                message = detail
+            await interaction.followup.send(message, ephemeral=True)
+            return
+
+        self._set_track_requester_id(track, member.id)
+
+        was_idle = player.current is None and not player.playing and not player.paused and player.queue.is_empty
+        await player.queue.put_wait(track)
+
+        if was_idle:
+            try:
+                await self._play_next(player)
+            except Exception as exc:
+                LOGGER.warning(
+                    "Falha ao iniciar reprodução na guild %s.",
+                    guild.id,
+                    exc_info=(type(exc), exc, exc.__traceback__),
+                )
                 await interaction.followup.send(
-                    f"A fila já atingiu o limite de {MAX_QUEUE_ITEMS} faixas.",
+                    "Não consegui iniciar essa faixa agora. Tente novamente em instantes.",
                     ephemeral=True,
                 )
                 return
-            player.queue.append(track)
-            queued_position = len(player.queue) + (1 if player.current else 0)
-            player.queue_event.set()
-
-        self._schedule_prefetch(player)
-        self._start_loop_if_needed(player)
-
-        if queued_position <= 1 and player.current is None:
-            header = "Preparando para Tocar"
+            header = "Preparando para tocar"
             queue_position = None
         else:
             header = "Adicionado na Fila"
-            queue_position = queued_position
+            queue_position = self._queue_length(player.queue) + (1 if player.current else 0)
 
         await interaction.followup.send(
             embed=self._build_track_embed(
@@ -1327,17 +777,23 @@ class MusicCog(commands.Cog):
             await self._respond(interaction, "Este comando só funciona em servidor.", ephemeral=True)
             return
 
-        player = self._players.get(guild.id)
-        if player is None:
+        if wavelink is None:
+            await self._respond(interaction, "Dependência `wavelink` não está instalada.", ephemeral=True)
+            return
+
+        voice_client = guild.voice_client
+        if voice_client is None or not isinstance(voice_client, wavelink.Player) or not voice_client.connected:
             await self._respond(interaction, "Não há fila ativa nesta guilda.", ephemeral=True)
             return
 
-        pending = await self._queue_snapshot(player)
+        player = voice_client
+        pending = self._queue_items(player.queue)
         lines: list[str] = []
+
         if player.current:
-            lines.append(
-                f"Tocando agora: **{player.current.title}** (`{self._format_duration(player.current.duration_seconds)}`)"
-            )
+            current_length = getattr(player.current, "length", None)
+            current_ms = int(current_length) if isinstance(current_length, (int, float)) else None
+            lines.append(f"Tocando agora: **{player.current.title}** (`{self._format_duration_ms(current_ms)}`)")
         else:
             lines.append("Tocando agora: nada")
 
@@ -1346,7 +802,10 @@ class MusicCog(commands.Cog):
         else:
             lines.append("Próximas faixas:")
             for index, track in enumerate(pending[:limite], start=1):
-                lines.append(f"{index}. **{track.title}** (`{self._format_duration(track.duration_seconds)}`)")
+                track_length = getattr(track, "length", None)
+                duration_ms = int(track_length) if isinstance(track_length, (int, float)) else None
+                track_title = str(getattr(track, "title", "Faixa desconhecida") or "Faixa desconhecida")
+                lines.append(f"{index}. **{track_title}** (`{self._format_duration_ms(duration_ms)}`)")
             if len(pending) > limite:
                 lines.append(f"... e mais {len(pending) - limite} faixas.")
 
@@ -1360,15 +819,18 @@ class MusicCog(commands.Cog):
             await self._respond(interaction, "Este comando só funciona em servidor.", ephemeral=True)
             return
 
-        player = self._players.get(guild.id)
-        if player is None or player.current is None:
+        if wavelink is None:
+            await self._respond(interaction, "Dependência `wavelink` não está instalada.", ephemeral=True)
+            return
+
+        voice_client = guild.voice_client
+        if voice_client is None or not isinstance(voice_client, wavelink.Player) or voice_client.current is None:
             await self._respond(interaction, "Não há música tocando agora.", ephemeral=True)
             return
 
-        track = player.current
         await self._respond_embed(
             interaction,
-            embed=self._build_track_embed(track, header="Tocando Agora"),
+            embed=self._build_track_embed(voice_client.current, header="Tocando Agora"),
         )
 
     @music.command(name="pause", description="Pausa a reprodução atual.")
@@ -1380,22 +842,26 @@ class MusicCog(commands.Cog):
             await self._respond(interaction, "Este comando só funciona em servidor.", ephemeral=True)
             return
 
-        player = self._players.get(guild.id)
-        if player is None or player.voice_client is None:
+        if wavelink is None:
+            await self._respond(interaction, "Dependência `wavelink` não está instalada.", ephemeral=True)
+            return
+
+        voice_client = guild.voice_client
+        if voice_client is None or not isinstance(voice_client, wavelink.Player):
             await self._respond(interaction, "Não há player ativo nesta guilda.", ephemeral=True)
             return
 
+        player = voice_client
         allowed, reason = self._can_control(member, player)
         if not allowed:
             await self._respond(interaction, reason or "Ação negada.", ephemeral=True)
             return
 
-        voice_client = player.voice_client
-        if not voice_client.is_playing():
+        if not player.playing:
             await self._respond(interaction, "Não há música tocando neste momento.", ephemeral=True)
             return
 
-        voice_client.pause()
+        await player.pause(True)
         await self._respond(interaction, "Música pausada.")
 
     @music.command(name="resume", description="Retoma a reprodução pausada.")
@@ -1407,22 +873,26 @@ class MusicCog(commands.Cog):
             await self._respond(interaction, "Este comando só funciona em servidor.", ephemeral=True)
             return
 
-        player = self._players.get(guild.id)
-        if player is None or player.voice_client is None:
+        if wavelink is None:
+            await self._respond(interaction, "Dependência `wavelink` não está instalada.", ephemeral=True)
+            return
+
+        voice_client = guild.voice_client
+        if voice_client is None or not isinstance(voice_client, wavelink.Player):
             await self._respond(interaction, "Não há player ativo nesta guilda.", ephemeral=True)
             return
 
+        player = voice_client
         allowed, reason = self._can_control(member, player)
         if not allowed:
             await self._respond(interaction, reason or "Ação negada.", ephemeral=True)
             return
 
-        voice_client = player.voice_client
-        if not voice_client.is_paused():
+        if not player.paused:
             await self._respond(interaction, "Nenhuma música pausada para retomar.", ephemeral=True)
             return
 
-        voice_client.resume()
+        await player.pause(False)
         await self._respond(interaction, "Reprodução retomada.")
 
     @music.command(name="skip", description="Pula para a próxima música da fila.")
@@ -1434,23 +904,34 @@ class MusicCog(commands.Cog):
             await self._respond(interaction, "Este comando só funciona em servidor.", ephemeral=True)
             return
 
-        player = self._players.get(guild.id)
-        if player is None or player.voice_client is None:
+        if wavelink is None:
+            await self._respond(interaction, "Dependência `wavelink` não está instalada.", ephemeral=True)
+            return
+
+        voice_client = guild.voice_client
+        if voice_client is None or not isinstance(voice_client, wavelink.Player):
             await self._respond(interaction, "Não há player ativo nesta guilda.", ephemeral=True)
             return
 
+        player = voice_client
         allowed, reason = self._can_control(member, player)
         if not allowed:
             await self._respond(interaction, reason or "Ação negada.", ephemeral=True)
             return
 
-        voice_client = player.voice_client
-        if not voice_client.is_playing() and not voice_client.is_paused():
+        if not player.playing and not player.paused:
             await self._respond(interaction, "Não há faixa para pular agora.", ephemeral=True)
             return
 
-        current_title = player.current.title if player.current else "Faixa atual"
-        voice_client.stop()
+        current_title = str(getattr(player.current, "title", "Faixa atual") or "Faixa atual")
+
+        try:
+            await player.skip(force=True)
+        except TypeError:
+            await player.skip()
+        except Exception:
+            await player.stop()
+
         await self._respond(interaction, f"Pulada: **{current_title}**")
 
     @music.command(name="stop", description="Para a música atual e limpa a fila.")
@@ -1462,19 +943,27 @@ class MusicCog(commands.Cog):
             await self._respond(interaction, "Este comando só funciona em servidor.", ephemeral=True)
             return
 
-        player = self._players.get(guild.id)
-        if player is None or player.voice_client is None:
+        if wavelink is None:
+            await self._respond(interaction, "Dependência `wavelink` não está instalada.", ephemeral=True)
+            return
+
+        voice_client = guild.voice_client
+        if voice_client is None or not isinstance(voice_client, wavelink.Player):
             await self._respond(interaction, "Não há player ativo nesta guilda.", ephemeral=True)
             return
 
+        player = voice_client
         allowed, reason = self._can_control(member, player)
         if not allowed:
             await self._respond(interaction, reason or "Ação negada.", ephemeral=True)
             return
 
-        cleared = await self._clear_queue(player)
-        if player.voice_client.is_playing() or player.voice_client.is_paused():
-            player.voice_client.stop()
+        cleared = self._queue_length(player.queue)
+        player.queue.clear()
+
+        if player.playing or player.paused:
+            await player.stop()
+
         await self._respond(interaction, f"Fila limpa e reprodução interrompida. Itens removidos: `{cleared}`.")
 
     @music.command(name="leave", description="Desconecta o bot do canal de voz e limpa a fila.")
@@ -1486,17 +975,27 @@ class MusicCog(commands.Cog):
             await self._respond(interaction, "Este comando só funciona em servidor.", ephemeral=True)
             return
 
-        player = self._players.get(guild.id)
-        if player is None:
+        if wavelink is None:
+            await self._respond(interaction, "Dependência `wavelink` não está instalada.", ephemeral=True)
+            return
+
+        voice_client = guild.voice_client
+        if voice_client is None or not isinstance(voice_client, wavelink.Player):
             await self._respond(interaction, "Não estou conectado em canal de voz nesta guilda.", ephemeral=True)
             return
 
+        player = voice_client
         allowed, reason = self._can_control(member, player)
         if not allowed:
             await self._respond(interaction, reason or "Ação negada.", ephemeral=True)
             return
 
-        await self._disconnect_player(guild.id)
+        player.queue.clear()
+        await player.disconnect()
+
+        state = self._get_state(guild.id)
+        self._cancel_idle_task(state)
+
         await self._respond(interaction, "Desconectado do canal de voz e fila removida.")
 
     @music.command(name="volume", description="Ajusta o volume da reprodução (0 a 200).")
@@ -1509,20 +1008,22 @@ class MusicCog(commands.Cog):
             await self._respond(interaction, "Este comando só funciona em servidor.", ephemeral=True)
             return
 
-        player = self._players.get(guild.id)
-        if player is None or player.voice_client is None:
+        if wavelink is None:
+            await self._respond(interaction, "Dependência `wavelink` não está instalada.", ephemeral=True)
+            return
+
+        voice_client = guild.voice_client
+        if voice_client is None or not isinstance(voice_client, wavelink.Player):
             await self._respond(interaction, "Não há player ativo nesta guilda.", ephemeral=True)
             return
 
+        player = voice_client
         allowed, reason = self._can_control(member, player)
         if not allowed:
             await self._respond(interaction, reason or "Ação negada.", ephemeral=True)
             return
 
-        player.volume = valor / 100
-        source = player.voice_client.source
-        if isinstance(source, discord.PCMVolumeTransformer):
-            source.volume = player.volume
+        await player.set_volume(int(valor))
         await self._respond(interaction, f"Volume ajustado para `{valor}%`.")
 
 

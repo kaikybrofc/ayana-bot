@@ -27,8 +27,9 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 ### 🎵 Sistema de Música
 - **Player em Canal de Voz**: Comandos slash para conectar, tocar, pausar, retomar e sair do canal.
 - **Fila por Servidor**: Gerenciamento de músicas em memória com skip, stop e visualização da queue.
-- **Busca + Stream Imediato**: Integração com API externa [`yt-dls`](https://github.com/kaikybrofc/yt-dls) (`/search`, `/resolve`, `/stream`, `/prefetch`).
-- **Diagnóstico Rápido**: `/music setup` valida FFmpeg + stack de voz (`PyNaCl`/`davey`) + API de música.
+- **Busca + Stream Imediato**: Reprodução via **Lavalink** com busca YouTube.
+- **Cookies no Lavalink**: Compatível com cookies para reduzir bloqueios anti-bot.
+- **Diagnóstico Rápido**: `/music setup` valida Lavalink + cookies + stack de voz (`PyNaCl`/`davey`).
 
 ### 🖼️ Integração NekoSia
 - **Busca de Imagens**: Acesso à API NekoSia com filtros por categoria, tags e animes.
@@ -47,7 +48,7 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 - **Framework**: [Discord.py 2.4](https://discordpy.readthedocs.io/)
 - **Banco de Dados**: [MySQL](https://www.mysql.com/) / [aiomysql](https://github.com/aio-libs/aiomysql)
 - **Processamento de Imagem**: [Pillow](https://python-pillow.org/) & [Pilmoji](https://github.com/dtimofeev/pilmoji)
-- **Audio/Streaming**: `discord.py[voice]` (`PyNaCl` + `davey`), API [`yt-dls`](https://github.com/kaikybrofc/yt-dls), `FFmpeg` (binário do sistema).
+- **Audio/Streaming**: `discord.py[voice]` (`PyNaCl` + `davey`), [`wavelink`](https://github.com/PythonistaGuild/Wavelink), servidor **Lavalink**.
 - **Outros**: `aiohttp`, `python-dotenv`, `regex`.
 
 ---
@@ -57,8 +58,8 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 - Python 3.10 ou superior.
 - Instância do MySQL 8.0+.
 - Token do bot no [Discord Developer Portal](https://discord.com/developers/applications).
-- API de música [`yt-dls`](https://github.com/kaikybrofc/yt-dls) instalada e em execução.
-- FFmpeg instalado no sistema (`ffmpeg` no PATH) para comandos de música.
+- Servidor **Lavalink** instalado e em execução.
+- Cookies configurados no Lavalink para YouTube (recomendado).
 
 ---
 
@@ -83,28 +84,17 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
    pip install -r requirements.txt
    ```
 
-   **(Opcional - recursos de música no Linux/Debian)** Garanta o FFmpeg:
-   ```bash
-   sudo apt-get update && sudo apt-get install -y ffmpeg
-   ```
-
    **(Opcional - desenvolvimento)** Instale formatador e lint:
    ```bash
    pip install -r requirements-dev.txt
    ```
 
-4. **Instale e inicie a API de música (`yt-dls`):**
-   Use o repositório oficial:  
-   **https://github.com/kaikybrofc/yt-dls**
+4. **Instale e inicie o Lavalink:**
+   Use o projeto oficial:  
+   **https://github.com/lavalink-devs/Lavalink**
 
-   Exemplo rápido:
-   ```bash
-   git clone https://github.com/kaikybrofc/yt-dls.git
-   cd yt-dls
-   # siga o README do projeto para instalar dependencias e iniciar a API
-   ```
-
-   > O Ayana espera a API em `http://127.0.0.1:3013` por padrão.
+   > Configure os plugins/sources do Lavalink para YouTube com cookies.
+   > No Ayana, o nó padrão esperado é `http://127.0.0.1:2333`.
 
 5. **Configure as variáveis de ambiente:**
    Copie o arquivo `.env.example` para `.env` e preencha os campos:
@@ -128,9 +118,11 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
    ENABLE_MEMBERS_INTENT=true
    ENABLE_MESSAGE_CONTENT_INTENT=true
 
-   # Musica (requer API yt-dls + FFmpeg)
-   FFMPEG_BINARY=ffmpeg
-   YTDLS_API_BASE_URL=http://127.0.0.1:3013
+   # Musica (requer Lavalink + cookies no servidor Lavalink)
+   LAVALINK_URI=http://127.0.0.1:2333
+   LAVALINK_PASSWORD=youshallnotpass
+   LAVALINK_NODE_ID=ayana-node
+   LAVALINK_COOKIES_PATH=/opt/lavalink/cookies.txt
    ```
 
 ---
