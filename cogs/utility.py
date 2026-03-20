@@ -76,7 +76,7 @@ COMMAND_DETAILS: dict[str, dict[str, str]] = {
         "uso": "/music setup",
         "permissoes": "Nenhuma",
         "escopo": "Servidor e DM",
-        "detalhes": "Diagnostica dependencias de audio: FFmpeg, yt-dlp, API externa, PyNaCl e Davey.",
+        "detalhes": "Diagnostica dependencias de audio: FFmpeg, endpoints YTMP3, PyNaCl e Davey.",
     },
     "music join": {
         "categoria": "Musica",

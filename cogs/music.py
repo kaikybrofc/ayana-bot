@@ -4,23 +4,19 @@ import asyncio
 import json
 import logging
 import os
+import random
 import re
 import shutil
 import time
 from collections import deque
 from dataclasses import dataclass, field, replace
 from typing import Any
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import parse_qs, urlparse
 
 import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
-
-try:
-    import yt_dlp
-except ImportError:  # pragma: no cover - optional dependency in runtime
-    yt_dlp = None  # type: ignore[assignment]
 
 try:
     import nacl  # noqa: F401
@@ -35,28 +31,25 @@ YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 IDLE_TIMEOUT_SECONDS = 300
 DEFAULT_VOLUME_PERCENT = 60
 MAX_QUEUE_ITEMS = 100
-MUSIC_API_BASE_URL_DEFAULT = "http://127.0.0.1:3013"
-MUSIC_API_CONNECT_TIMEOUT_SECONDS = 2.5
-MUSIC_API_REQUEST_TIMEOUT_SECONDS = 14
-MUSIC_API_PREFETCH_TIMEOUT_SECONDS = 4
-MUSIC_API_PREFETCH_WAIT_SECONDS = 1.2
-MUSIC_API_PROBE_TIMEOUT_SECONDS = 2.0
+HTTP_CONNECT_TIMEOUT_SECONDS = 2.5
+HTTP_REQUEST_TIMEOUT_SECONDS = 14
+YTMP3_PROBE_TIMEOUT_SECONDS = 2.0
 LOCAL_RESOLVE_CACHE_TTL_SECONDS = 900
 LOCAL_RESOLVE_CACHE_MAX_ITEMS = 4000
 STREAM_URL_REFRESH_WINDOW_SECONDS = 90
-YTDLP_RESOLVE_TIMEOUT_SECONDS = 11
-YTDLP_SEARCH_TIMEOUT_SECONDS = 6
-YTDLP_PLAYBACK_TIMEOUT_SECONDS = 8
-YTDLP_ERROR_SNIPPET_LIMIT = 600
-MAX_SEARCH_CANDIDATES = 1
+STREAM_TRANSIENT_RETRY_DELAYS_SECONDS = (0.25, 0.5, 1.0)
+STREAM_429_JITTER_MAX_SECONDS = 0.25
+STREAM_HTTP_STATUS_RE = re.compile(r"\b(401|404|410|429|500|502|503|504)\b")
+LOG_ERROR_SNIPPET_LIMIT = 600
+MAX_SEARCH_CANDIDATES = 5
 PLAY_COMMAND_RESOLVE_TIMEOUT_SECONDS = 26
-PLAY_COMMAND_INTERNAL_SAFETY_SECONDS = 2.0
-YTDLP_PLAYBACK_RETRIES = 0
-YTDLP_PRIMARY_FORMAT_SELECTOR = "bestaudio[ext=webm]/bestaudio/best/best"
-YTDLP_FALLBACK_FORMAT_SELECTORS = (
-    "best",
-)
-YTDLP_SEARCH_RESULTS = 1
+YTMP3_SEARCH_BASE_URL_DEFAULT = "https://yt-meta.ytconvert.org"
+YTMP3_DOWNLOAD_API_URL_DEFAULT = "https://hub.ytconvert.org/api/download"
+YTMP3_SEARCH_TIMEOUT_SECONDS = 8
+YTMP3_DOWNLOAD_CREATE_TIMEOUT_SECONDS = 22
+YTMP3_STATUS_TIMEOUT_SECONDS = 12
+YTMP3_STATUS_MAX_POLLS = 16
+YTMP3_STATUS_POLL_INTERVAL_SECONDS = 1.0
 
 
 @dataclass(slots=True)
@@ -74,21 +67,14 @@ class QueueTrack:
     original_input: str = ""
     stream_expires_at: float = 0.0
     play_attempts: int = 0
-    prefetch_state: str = "idle"
     resolved_at: float = 0.0
-    source: str = "youtube"
+    source: str = "ytmp3.gg"
 
 
 @dataclass(slots=True)
 class ResolveCacheEntry:
     track: QueueTrack
     expires_at: float
-
-
-class MusicApiRequestError(RuntimeError):
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
-        super().__init__(message)
-        self.status_code = status_code
 
 
 @dataclass(slots=True)
@@ -113,7 +99,6 @@ class MusicCog(commands.Cog):
         self._resolve_inflight: dict[str, asyncio.Task[QueueTrack]] = {}
         self._resolve_inflight_lock = asyncio.Lock()
         self._http_session: aiohttp.ClientSession | None = None
-        self._background_tasks: set[asyncio.Task[Any]] = set()
 
     def cog_unload(self) -> None:
         for state in self._states.values():
@@ -122,10 +107,6 @@ class MusicCog(commands.Cog):
         for voice_client in list(self.bot.voice_clients):
             if isinstance(voice_client, discord.VoiceClient) and voice_client.is_connected():
                 asyncio.create_task(voice_client.disconnect(force=True))
-
-        for task in list(self._background_tasks):
-            task.cancel()
-        self._background_tasks.clear()
 
         if self._http_session is not None and not self._http_session.closed:
             asyncio.create_task(self._http_session.close())
@@ -213,17 +194,24 @@ class MusicCog(commands.Cog):
         return "ffmpeg"
 
     @staticmethod
-    def _music_api_base_url() -> str:
-        configured = os.getenv("MUSIC_API_BASE_URL", MUSIC_API_BASE_URL_DEFAULT).strip()
+    def _ytmp3_search_base_url() -> str:
+        configured = os.getenv("MUSIC_YTMP3_SEARCH_BASE_URL", YTMP3_SEARCH_BASE_URL_DEFAULT).strip()
         if not configured:
-            return MUSIC_API_BASE_URL_DEFAULT
+            return YTMP3_SEARCH_BASE_URL_DEFAULT
+        return configured.rstrip("/")
+
+    @staticmethod
+    def _ytmp3_download_api_url() -> str:
+        configured = os.getenv("MUSIC_YTMP3_DOWNLOAD_API_URL", YTMP3_DOWNLOAD_API_URL_DEFAULT).strip()
+        if not configured:
+            return YTMP3_DOWNLOAD_API_URL_DEFAULT
         return configured.rstrip("/")
 
     async def _http_client(self) -> aiohttp.ClientSession:
         if self._http_session is None or self._http_session.closed:
             timeout = aiohttp.ClientTimeout(
-                total=MUSIC_API_REQUEST_TIMEOUT_SECONDS,
-                connect=MUSIC_API_CONNECT_TIMEOUT_SECONDS,
+                total=HTTP_REQUEST_TIMEOUT_SECONDS,
+                connect=HTTP_CONNECT_TIMEOUT_SECONDS,
             )
             connector = aiohttp.TCPConnector(
                 limit=200,
@@ -238,94 +226,33 @@ class MusicCog(commands.Cog):
             )
         return self._http_session
 
-    def _ytdlp_path(self) -> str:
-        configured = os.getenv("MUSIC_YTDLP_PATH")
-        if configured and configured.strip():
-            return configured.strip()
-
-        local_default = "/root/.local/bin/yt-dlp"
-        if os.path.exists(local_default):
-            return local_default
-        return "yt-dlp"
-
-    def _ytdlp_runtime(self) -> str:
-        configured = os.getenv("MUSIC_YTDLP_JS_RUNTIME")
-        if configured and configured.strip():
-            return configured.strip()
-        return "node"
-
-    def _ytdlp_cookies_path(self) -> str | None:
-        configured = os.getenv("MUSIC_YTDLP_COOKIES_PATH")
-        if configured is not None and not configured.strip():
-            return None
-
-        candidates: list[str] = []
-        if configured:
-            normalized = configured.strip()
-            if normalized:
-                candidates.append(normalized)
-
-        # Local padrão do projeto para cookies do yt-dlp.
-        candidates.append("/root/ayana-bot/cookies.txt")
-
-        deduplicated: list[str] = []
-        seen: set[str] = set()
-        for candidate in candidates:
-            if candidate in seen:
-                continue
-            deduplicated.append(candidate)
-            seen.add(candidate)
-
-        for candidate in deduplicated:
-            if os.path.exists(candidate):
-                return candidate
-
-        if deduplicated:
-            # Retorna o primeiro para diagnóstico claro em /music setup.
-            return deduplicated[0]
-        return None
-
     @staticmethod
     def _path_available(executable: str) -> bool:
         if os.path.sep in executable:
             return os.path.exists(executable)
         return shutil.which(executable) is not None
 
-    def _create_background_task(self, coro: Any, *, name: str) -> None:
-        task = asyncio.create_task(coro, name=name)
-        self._background_tasks.add(task)
-
-        def _done_callback(finished: asyncio.Task[Any]) -> None:
-            self._background_tasks.discard(finished)
-            if finished.cancelled():
-                return
-            exc = finished.exception()
-            if exc is not None:
-                LOGGER.warning(
-                    "Task em background falhou (%s).",
-                    name,
-                    exc_info=(type(exc), exc, exc.__traceback__),
-                )
-
-        task.add_done_callback(_done_callback)
-
-    async def _probe_music_api(self) -> None:
-        base_url = self._music_api_base_url()
-        if not self._is_url(base_url):
-            raise RuntimeError(f"MUSIC_API_BASE_URL inválida: `{base_url}`.")
+    async def _probe_ytmp3(self) -> None:
+        search_base = self._ytmp3_search_base_url()
+        if not self._is_url(search_base):
+            raise RuntimeError(f"MUSIC_YTMP3_SEARCH_BASE_URL inválida: `{search_base}`.")
 
         session = await self._http_client()
-        timeout = aiohttp.ClientTimeout(total=MUSIC_API_PROBE_TIMEOUT_SECONDS)
+        timeout = aiohttp.ClientTimeout(total=YTMP3_PROBE_TIMEOUT_SECONDS)
         try:
-            async with session.get(base_url, timeout=timeout) as response:
+            async with session.get(
+                f"{search_base}/search",
+                params={"q": "music test"},
+                timeout=timeout,
+            ) as response:
                 if response.status >= 500:
                     raise RuntimeError(
-                        f"API de música indisponível em `{base_url}` (status HTTP {response.status})."
+                        f"Endpoint de busca YTMP3 indisponível em `{search_base}` (status HTTP {response.status})."
                     )
         except asyncio.TimeoutError as exc:
-            raise RuntimeError(f"Timeout ao conectar na API de música `{base_url}`.") from exc
+            raise RuntimeError(f"Timeout ao conectar no endpoint de busca YTMP3 `{search_base}`.") from exc
         except aiohttp.ClientError as exc:
-            raise RuntimeError(f"Não consegui conectar na API de música `{base_url}`.") from exc
+            raise RuntimeError(f"Não consegui conectar no endpoint de busca YTMP3 `{search_base}`.") from exc
 
     async def _dependency_issues(self, *, include_api_probe: bool = False) -> list[str]:
         issues: list[str] = []
@@ -337,12 +264,16 @@ class MusicCog(commands.Cog):
         if not self._path_available(ffmpeg_path):
             issues.append(f"FFmpeg não encontrado em `{ffmpeg_path}`.")
 
-        base_url = self._music_api_base_url()
-        if not self._is_url(base_url):
-            issues.append(f"MUSIC_API_BASE_URL inválida: `{base_url}`.")
-        elif include_api_probe:
+        search_base = self._ytmp3_search_base_url()
+        download_url = self._ytmp3_download_api_url()
+        if not self._is_url(search_base):
+            issues.append(f"MUSIC_YTMP3_SEARCH_BASE_URL inválida: `{search_base}`.")
+        if not self._is_url(download_url):
+            issues.append(f"MUSIC_YTMP3_DOWNLOAD_API_URL inválida: `{download_url}`.")
+
+        if include_api_probe and not issues:
             try:
-                await self._probe_music_api()
+                await self._probe_ytmp3()
             except RuntimeError as exc:
                 issues.append(str(exc))
 
@@ -414,19 +345,6 @@ class MusicCog(commands.Cog):
 
         return embed
 
-    async def _disconnect_guild_voice_client(self, guild: discord.Guild) -> None:
-        voice_client = guild.voice_client
-        if voice_client is None:
-            return
-        try:
-            await voice_client.disconnect(force=True)
-        except Exception as exc:
-            LOGGER.warning(
-                "Falha ao limpar cliente de voz da guild %s.",
-                guild.id,
-                exc_info=(type(exc), exc, exc.__traceback__),
-            )
-
     def _schedule_idle_disconnect(self, guild_id: int) -> None:
         state = self._get_state(guild_id)
         self._cancel_idle_task(state)
@@ -466,7 +384,7 @@ class MusicCog(commands.Cog):
         )
 
     @staticmethod
-    def _truncate_for_log(value: str, limit: int = YTDLP_ERROR_SNIPPET_LIMIT) -> str:
+    def _truncate_for_log(value: str, limit: int = LOG_ERROR_SNIPPET_LIMIT) -> str:
         text = value.strip()
         if len(text) <= limit:
             return text
@@ -485,18 +403,6 @@ class MusicCog(commands.Cog):
             return f"url:{normalized_query}"
         return f"q:{normalized_query.lower()}"
 
-    def _normalize_stream_url(self, value: str) -> str:
-        raw = value.strip()
-        if not raw:
-            return ""
-        if self._is_url(raw):
-            return raw
-
-        base_url = self._music_api_base_url()
-        if raw.startswith("/"):
-            return f"{base_url}{raw}"
-        return urljoin(f"{base_url}/", raw)
-
     @staticmethod
     def _extract_stream_expires_at(stream_url: str) -> float:
         if not stream_url.strip():
@@ -507,7 +413,8 @@ class MusicCog(commands.Cog):
         except Exception:
             return 0.0
 
-        exp_values = parse_qs(parsed.query).get("exp", [])
+        query_values = parse_qs(parsed.query)
+        exp_values = query_values.get("exp", []) or query_values.get("expires", [])
         if not exp_values:
             return 0.0
 
@@ -536,176 +443,6 @@ class MusicCog(commands.Cog):
             # Duração em segundos na maioria dos payloads.
             return int(number * 1000)
         return None
-
-    def _parse_resolve_payload(
-        self,
-        payload: dict[str, Any],
-        *,
-        query: str,
-        requester_id: int,
-    ) -> QueueTrack:
-        root_payload = payload
-        for wrapper_key in ("data", "dados", "result", "resultado", "payload"):
-            wrapper_value = payload.get(wrapper_key)
-            if isinstance(wrapper_value, dict):
-                root_payload = wrapper_value
-                break
-
-        track_payload = root_payload.get("track")
-        if not isinstance(track_payload, dict):
-            track_payload = {}
-
-        metadata = root_payload.get("metadata")
-        if not isinstance(metadata, dict):
-            metadata = track_payload.get("metadata")
-        if not isinstance(metadata, dict):
-            metadata = {}
-
-        stream_url_candidate = ""
-        for container in (root_payload, payload, track_payload, metadata):
-            for key in ("stream_url", "streamUrl", "url"):
-                value = container.get(key)
-                if isinstance(value, str) and value.strip():
-                    stream_url_candidate = value.strip()
-                    break
-            if stream_url_candidate:
-                break
-
-        stream_url = self._normalize_stream_url(stream_url_candidate)
-        if not self._is_url(stream_url):
-            raise RuntimeError("A API não retornou `stream_url` válida para reprodução.")
-
-        identifier = ""
-        for container in (root_payload, payload, track_payload, metadata):
-            for key in ("track_id", "trackId", "id"):
-                value = container.get(key)
-                if isinstance(value, str) and value.strip():
-                    identifier = value.strip()
-                    break
-            if identifier:
-                break
-
-        if not identifier:
-            parsed = urlparse(stream_url)
-            path_parts = [part for part in parsed.path.strip("/").split("/") if part]
-            if len(path_parts) >= 2 and path_parts[-2] == "stream":
-                identifier = path_parts[-1]
-
-        title = "Faixa desconhecida"
-        for container in (metadata, track_payload, root_payload, payload):
-            for key in ("title", "name"):
-                value = container.get(key)
-                if isinstance(value, str) and value.strip():
-                    title = value.strip()
-                    break
-            if title != "Faixa desconhecida":
-                break
-
-        author = "Desconhecido"
-        for container in (metadata, track_payload, root_payload, payload):
-            for key in ("author", "uploader", "channel", "artist"):
-                value = container.get(key)
-                if isinstance(value, str) and value.strip():
-                    author = value.strip()
-                    break
-            if author != "Desconhecido":
-                break
-
-        duration_ms: int | None = None
-        duration_ms_candidates = (
-            metadata.get("duration_ms"),
-            metadata.get("durationMs"),
-            track_payload.get("duration_ms"),
-            track_payload.get("durationMs"),
-            root_payload.get("duration_ms"),
-            root_payload.get("durationMs"),
-            payload.get("duration_ms"),
-            payload.get("durationMs"),
-        )
-        for candidate in duration_ms_candidates:
-            if isinstance(candidate, (int, float)) and float(candidate) > 0:
-                duration_ms = int(float(candidate))
-                break
-
-        if duration_ms is None:
-            for candidate in (
-                metadata.get("duration"),
-                track_payload.get("duration"),
-                root_payload.get("duration"),
-                payload.get("duration"),
-            ):
-                duration_ms = self._duration_to_ms(candidate)
-                if duration_ms is not None:
-                    break
-
-        thumbnail_url: str | None = None
-        for container in (metadata, track_payload, root_payload, payload):
-            for key in ("thumbnail", "thumbnail_url", "thumbnailUrl"):
-                value = container.get(key)
-                if isinstance(value, str) and self._is_url(value.strip()):
-                    thumbnail_url = value.strip()
-                    break
-            if thumbnail_url:
-                break
-
-            thumbnails = container.get("thumbnails")
-            if isinstance(thumbnails, list):
-                for item in thumbnails:
-                    if not isinstance(item, dict):
-                        continue
-                    thumb_value = item.get("url")
-                    if isinstance(thumb_value, str) and self._is_url(thumb_value.strip()):
-                        thumbnail_url = thumb_value.strip()
-                        break
-            if thumbnail_url:
-                break
-
-        webpage_url = ""
-        for container in (metadata, track_payload, root_payload, payload):
-            for key in ("webpage_url", "webpageUrl", "original_url", "originalUrl", "source_url", "sourceUrl"):
-                value = container.get(key)
-                if isinstance(value, str) and self._is_url(value.strip()):
-                    webpage_url = value.strip()
-                    break
-            if webpage_url:
-                break
-
-        if not webpage_url:
-            webpage_url = stream_url
-
-        source = "music-api"
-        for container in (metadata, track_payload, root_payload, payload):
-            for key in ("source", "platform", "provider"):
-                value = container.get(key)
-                if isinstance(value, str) and value.strip():
-                    source = value.strip()
-                    break
-            if source != "music-api":
-                break
-
-        normalized_query = query.strip()
-        stream_expires_at = self._extract_stream_expires_at(stream_url)
-        if stream_expires_at <= 0:
-            stream_expires_at = time.time() + 180
-
-        return QueueTrack(
-            identifier=identifier,
-            title=title,
-            author=author,
-            duration_ms=duration_ms,
-            webpage_url=webpage_url,
-            stream_url=stream_url,
-            thumbnail_url=thumbnail_url,
-            requester_id=requester_id,
-            search_query=normalized_query,
-            lookup_key=self._normalize_lookup_key(normalized_query),
-            original_input=normalized_query,
-            stream_expires_at=stream_expires_at,
-            play_attempts=0,
-            prefetch_state="idle",
-            resolved_at=time.time(),
-            source=source,
-        )
 
     def _cache_expiration_for_track(self, track: QueueTrack) -> float:
         now = time.time()
@@ -755,236 +492,266 @@ class MusicCog(commands.Cog):
             search_query=original_query.strip(),
             original_input=base.original_input.strip() or original_query.strip(),
             play_attempts=0,
-            prefetch_state="idle",
         )
 
-    async def _api_post_json(
+    async def _ytmp3_get_json(
         self,
-        path: str,
+        url: str,
+        params: dict[str, Any] | None = None,
+        *,
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        session = await self._http_client()
+        timeout = aiohttp.ClientTimeout(
+            total=max(1.0, float(timeout_seconds)),
+            connect=HTTP_CONNECT_TIMEOUT_SECONDS,
+        )
+        try:
+            async with session.get(
+                url,
+                params=params or None,
+                timeout=timeout,
+                headers={"Accept": "application/json"},
+            ) as response:
+                raw_body = await response.text()
+                payload: Any = {}
+                if raw_body.strip():
+                    try:
+                        payload = json.loads(raw_body)
+                    except json.JSONDecodeError:
+                        payload = {}
+
+                if response.status >= 400:
+                    detail = raw_body.strip() or f"HTTP {response.status}"
+                    if isinstance(payload, dict):
+                        message_value = payload.get("message") or payload.get("error") or payload.get("jobError")
+                        if isinstance(message_value, str) and message_value.strip():
+                            detail = message_value.strip()
+                    raise RuntimeError(
+                        f"YTMP3 retornou erro ({response.status}): {self._truncate_for_log(detail, 220)}"
+                    )
+
+                if isinstance(payload, dict):
+                    return payload
+                return {}
+        except asyncio.TimeoutError as exc:
+            raise RuntimeError("Timeout ao consultar endpoint YTMP3.") from exc
+        except aiohttp.ClientError as exc:
+            raise RuntimeError("Erro de conexão ao consultar endpoint YTMP3.") from exc
+
+    async def _ytmp3_post_json(
+        self,
+        url: str,
         payload: dict[str, Any],
         *,
-        timeout_seconds: float = MUSIC_API_REQUEST_TIMEOUT_SECONDS,
+        timeout_seconds: float,
     ) -> dict[str, Any]:
-        url = f"{self._music_api_base_url()}{path}"
         session = await self._http_client()
         timeout = aiohttp.ClientTimeout(
             total=max(1.0, float(timeout_seconds)),
-            connect=MUSIC_API_CONNECT_TIMEOUT_SECONDS,
+            connect=HTTP_CONNECT_TIMEOUT_SECONDS,
         )
-
         try:
-            async with session.post(url, json=payload, timeout=timeout) as response:
+            async with session.post(
+                url,
+                json=payload,
+                timeout=timeout,
+                headers={"Accept": "application/json"},
+            ) as response:
                 raw_body = await response.text()
-                parsed_body: Any = {}
+                data: Any = {}
                 if raw_body.strip():
                     try:
-                        parsed_body = json.loads(raw_body)
+                        data = json.loads(raw_body)
                     except json.JSONDecodeError:
-                        parsed_body = {}
+                        data = {}
 
                 if response.status >= 400:
                     detail = raw_body.strip() or f"HTTP {response.status}"
-                    if isinstance(parsed_body, dict):
-                        message_value = (
-                            parsed_body.get("message")
-                            or parsed_body.get("mensagem")
-                            or parsed_body.get("error")
-                        )
+                    if isinstance(data, dict):
+                        message_value = data.get("message") or data.get("error") or data.get("jobError")
                         if isinstance(message_value, str) and message_value.strip():
                             detail = message_value.strip()
-                    raise MusicApiRequestError(
-                        f"API {path} retornou erro ({response.status}): {self._truncate_for_log(detail, 220)}",
-                        status_code=response.status,
+                    raise RuntimeError(
+                        f"YTMP3 retornou erro ({response.status}): {self._truncate_for_log(detail, 220)}"
                     )
 
-                if not isinstance(parsed_body, dict):
-                    return {}
-                return parsed_body
+                if isinstance(data, dict):
+                    return data
+                return {}
         except asyncio.TimeoutError as exc:
-            raise MusicApiRequestError(f"Timeout ao chamar API {path}.") from exc
+            raise RuntimeError("Timeout ao criar job de stream no YTMP3.") from exc
         except aiohttp.ClientError as exc:
-            raise MusicApiRequestError(f"Erro de conexão ao chamar API {path}.") from exc
+            raise RuntimeError("Erro de conexão ao criar job de stream no YTMP3.") from exc
 
-    async def _api_get_json(
-        self,
-        path: str,
-        params: dict[str, Any],
-        *,
-        timeout_seconds: float = MUSIC_API_REQUEST_TIMEOUT_SECONDS,
-    ) -> dict[str, Any]:
-        url = f"{self._music_api_base_url()}{path}"
-        session = await self._http_client()
-        timeout = aiohttp.ClientTimeout(
-            total=max(1.0, float(timeout_seconds)),
-            connect=MUSIC_API_CONNECT_TIMEOUT_SECONDS,
-        )
+    def _extract_search_candidate_links(self, search_payload: dict[str, Any]) -> list[str]:
+        candidate_entries: list[dict[str, Any]] = []
 
-        try:
-            async with session.get(url, params=params, timeout=timeout) as response:
-                raw_body = await response.text()
-                parsed_body: Any = {}
-                if raw_body.strip():
-                    try:
-                        parsed_body = json.loads(raw_body)
-                    except json.JSONDecodeError:
-                        parsed_body = {}
+        for key in ("resultado", "resultados", "results", "itens", "items", "entries"):
+            value = search_payload.get(key)
+            if isinstance(value, dict):
+                candidate_entries.append(value)
+            elif isinstance(value, list):
+                candidate_entries.extend([item for item in value if isinstance(item, dict)])
 
-                if response.status >= 400:
-                    detail = raw_body.strip() or f"HTTP {response.status}"
-                    if isinstance(parsed_body, dict):
-                        message_value = (
-                            parsed_body.get("message")
-                            or parsed_body.get("mensagem")
-                            or parsed_body.get("error")
-                        )
-                        if isinstance(message_value, str) and message_value.strip():
-                            detail = message_value.strip()
-                    raise MusicApiRequestError(
-                        f"API {path} retornou erro ({response.status}): {self._truncate_for_log(detail, 220)}",
-                        status_code=response.status,
-                    )
+        links: list[str] = []
+        seen: set[str] = set()
 
-                if not isinstance(parsed_body, dict):
-                    return {}
-                return parsed_body
-        except asyncio.TimeoutError as exc:
-            raise MusicApiRequestError(f"Timeout ao chamar API {path}.") from exc
-        except aiohttp.ClientError as exc:
-            raise MusicApiRequestError(f"Erro de conexão ao chamar API {path}.") from exc
+        for entry in candidate_entries:
+            entry_type = str(entry.get("type") or "").strip().lower()
+            if entry_type and entry_type not in {"stream", "video"}:
+                continue
 
-    async def _resolve_query_to_youtube_link(self, query: str) -> str:
-        sanitized = query.strip()
-        if self._is_url(sanitized):
-            return sanitized
-
-        LOGGER.info("Resolvendo busca por nome via /search (query=%s).", sanitized[:120])
-        search_payload = await self._api_get_json(
-            "/search",
-            {"q": sanitized},
-            timeout_seconds=YTDLP_SEARCH_TIMEOUT_SECONDS,
-        )
-
-        candidates: list[dict[str, Any]] = []
-        resultado = search_payload.get("resultado")
-        if isinstance(resultado, dict):
-            candidates.append(resultado)
-        elif isinstance(resultado, list):
-            candidates.extend([item for item in resultado if isinstance(item, dict)])
-
-        for key in ("results", "itens", "items"):
-            possible = search_payload.get(key)
-            if isinstance(possible, list):
-                candidates.extend([item for item in possible if isinstance(item, dict)])
-
-        for entry in candidates:
             entry_url = self._entry_candidate_url(entry)
-            if entry_url:
-                return entry_url
+            if not entry_url:
+                for key in ("id", "link", "url", "webpage_url", "webpageUrl", "original_url", "originalUrl"):
+                    value = entry.get(key)
+                    if isinstance(value, str) and self._is_url(value.strip()):
+                        entry_url = value.strip()
+                        break
 
-            for key in ("link", "webpage_url", "webpageUrl"):
-                value = entry.get(key)
-                if isinstance(value, str) and self._is_url(value.strip()):
-                    return value.strip()
+            if not entry_url:
+                continue
 
-        total = search_payload.get("total")
-        if isinstance(total, (int, float)) and int(total) <= 0:
-            raise RuntimeError("Nenhum resultado encontrado para essa busca.")
-        raise RuntimeError("Não encontrei um resultado válido no /search para essa busca.")
+            dedupe_key = self._normalize_lookup_key(entry_url)
+            if dedupe_key in seen:
+                continue
 
-    async def _resolve_from_api(self, query: str, guild_id: int, requester_id: int) -> QueueTrack:
-        resolved_link = await self._resolve_query_to_youtube_link(query)
-        payloads = [
-            {"link": resolved_link, "guild_id": str(guild_id), "requester_id": str(requester_id)},
-            {"link": resolved_link, "guildId": str(guild_id), "requesterId": str(requester_id)},
-            {"link": resolved_link},
-        ]
-
-        last_error: Exception | None = None
-        for index, payload in enumerate(payloads):
-            try:
-                data = await self._api_post_json(
-                    "/resolve",
-                    payload,
-                    timeout_seconds=PLAY_COMMAND_RESOLVE_TIMEOUT_SECONDS - PLAY_COMMAND_INTERNAL_SAFETY_SECONDS,
-                )
-                return self._parse_resolve_payload(data, query=resolved_link, requester_id=requester_id)
-            except MusicApiRequestError as exc:
-                last_error = exc
-                should_retry_schema = exc.status_code in {400, 404, 422} and index < len(payloads) - 1
-                if should_retry_schema:
-                    continue
+            seen.add(dedupe_key)
+            links.append(entry_url)
+            if len(links) >= MAX_SEARCH_CANDIDATES:
                 break
 
-        if last_error is None:
-            raise RuntimeError("Não consegui resolver essa faixa na API local.")
-        raise RuntimeError(str(last_error)) from last_error
+        return links
 
-    async def _prefetch_track(self, track: QueueTrack, guild_id: int, *, wait_for_warmup: bool) -> None:
-        if track.prefetch_state in {"running", "done"}:
-            return
-        if not track.identifier.strip():
-            return
+    async def _resolve_query_to_youtube_links(self, query: str, guild_id: int) -> list[str]:
+        sanitized = query.strip()
+        if self._is_url(sanitized):
+            return [sanitized]
 
-        async def _run_prefetch() -> None:
-            payloads = [
-                {"track_ids": [track.identifier], "guild_id": str(guild_id)},
-                {"track_ids": [track.identifier], "guildId": str(guild_id)},
-                {"trackIds": [track.identifier], "guildId": str(guild_id)},
-                {"track_id": track.identifier, "guild_id": str(guild_id)},
-                {"trackId": track.identifier, "guildId": str(guild_id)},
-                {"track_id": track.identifier},
-                {"trackId": track.identifier},
-            ]
-            for index, payload in enumerate(payloads):
-                try:
-                    await self._api_post_json(
-                        "/prefetch",
-                        payload,
-                        timeout_seconds=MUSIC_API_PREFETCH_TIMEOUT_SECONDS,
-                    )
-                    track.prefetch_state = "done"
-                    return
-                except MusicApiRequestError as exc:
-                    should_retry_schema = exc.status_code in {400, 404, 422} and index < len(payloads) - 1
-                    if should_retry_schema:
-                        continue
-                    raise
-
-        track.prefetch_state = "running"
-        if wait_for_warmup:
-            try:
-                await asyncio.wait_for(_run_prefetch(), timeout=MUSIC_API_PREFETCH_WAIT_SECONDS)
-            except Exception as exc:
-                track.prefetch_state = "failed"
-                LOGGER.info(
-                    "Prefetch falhou para track_id=%s (guild=%s): %s",
-                    track.identifier,
-                    guild_id,
-                    self._truncate_for_log(str(exc), 180),
-                )
-            return
-
-        try:
-            await _run_prefetch()
-        except Exception as exc:
-            track.prefetch_state = "failed"
-            LOGGER.info(
-                "Prefetch em background falhou para track_id=%s (guild=%s): %s",
-                track.identifier,
-                guild_id,
-                self._truncate_for_log(str(exc), 180),
-            )
-
-    def _schedule_prefetch_next(self, state: GuildMusicState) -> None:
-        if not state.queue:
-            return
-        next_track = state.queue[0]
-        if next_track.prefetch_state in {"running", "done"}:
-            return
-        self._create_background_task(
-            self._prefetch_track(next_track, state.guild_id, wait_for_warmup=False),
-            name=f"music-prefetch-next-{state.guild_id}",
+        LOGGER.info("Resolvendo busca por nome via YTMP3 (query=%s).", sanitized[:120])
+        search_payload = await self._ytmp3_get_json(
+            f"{self._ytmp3_search_base_url()}/search",
+            {"q": sanitized},
+            timeout_seconds=YTMP3_SEARCH_TIMEOUT_SECONDS,
         )
+
+        candidate_links = self._extract_search_candidate_links(search_payload)
+        if candidate_links:
+            return candidate_links
+
+        raise RuntimeError("Nenhum resultado encontrado para essa busca.")
+
+    async def _resolve_from_ytmp3(self, query: str, guild_id: int, requester_id: int) -> QueueTrack:
+        resolved_links = await self._resolve_query_to_youtube_links(query, guild_id)
+        last_error: Exception | None = None
+        for candidate_index, resolved_link in enumerate(resolved_links, start=1):
+            LOGGER.info(
+                "Tentando resolver stream via YTMP3 (%s/%s) (guild=%s, link=%s).",
+                candidate_index,
+                len(resolved_links),
+                guild_id,
+                resolved_link[:120],
+            )
+            try:
+                create_payload = await self._ytmp3_post_json(
+                    self._ytmp3_download_api_url(),
+                    {
+                        "url": resolved_link,
+                        "os": "linux",
+                        "output": {"type": "audio", "format": "mp3"},
+                        "audio": {"bitrate": "128k", "trackId": "origin"},
+                    },
+                    timeout_seconds=YTMP3_DOWNLOAD_CREATE_TIMEOUT_SECONDS,
+                )
+
+                status_url_value = create_payload.get("statusUrl")
+                status_url = status_url_value.strip() if isinstance(status_url_value, str) else ""
+                if not self._is_url(status_url):
+                    raise RuntimeError("YTMP3 não retornou `statusUrl` válida para acompanhamento.")
+
+                status_payload: dict[str, Any] = {}
+                status_text = "pending"
+                for _ in range(YTMP3_STATUS_MAX_POLLS):
+                    status_payload = await self._ytmp3_get_json(
+                        status_url,
+                        timeout_seconds=YTMP3_STATUS_TIMEOUT_SECONDS,
+                    )
+                    status_text = str(status_payload.get("status") or "").strip().lower()
+                    if status_text == "completed":
+                        break
+                    if status_text in {"failed", "error", "not_found"}:
+                        detail = (
+                            status_payload.get("error")
+                            or status_payload.get("jobError")
+                            or status_payload.get("message")
+                            or "Falha desconhecida no processamento do YTMP3."
+                        )
+                        raise RuntimeError(str(detail))
+                    await asyncio.sleep(YTMP3_STATUS_POLL_INTERVAL_SECONDS)
+
+                if status_text != "completed":
+                    raise RuntimeError("O YTMP3 demorou demais para concluir a conversão desta faixa.")
+
+                stream_candidate = status_payload.get("downloadUrl")
+                if not isinstance(stream_candidate, str) or not self._is_url(stream_candidate.strip()):
+                    raise RuntimeError("O YTMP3 concluiu a conversão, mas não retornou URL de download válida.")
+
+                stream_url = stream_candidate.strip()
+                title_value = status_payload.get("title") or create_payload.get("title")
+                title = str(title_value).strip() if isinstance(title_value, str) and str(title_value).strip() else "Faixa desconhecida"
+
+                thumb_value = create_payload.get("thumbnail") or create_payload.get("thumbnailUrl")
+                thumbnail_url = thumb_value.strip() if isinstance(thumb_value, str) and self._is_url(thumb_value.strip()) else None
+
+                duration_ms: int | None = None
+                for candidate_duration in (status_payload.get("duration"), create_payload.get("duration")):
+                    duration_ms = self._duration_to_ms(candidate_duration)
+                    if duration_ms is not None:
+                        break
+
+                identifier = self._extract_youtube_video_id(resolved_link) or ""
+                if not identifier:
+                    try:
+                        parsed_status = urlparse(status_url)
+                        status_parts = [part for part in parsed_status.path.strip("/").split("/") if part]
+                        if status_parts:
+                            identifier = status_parts[-1]
+                    except Exception:
+                        identifier = ""
+
+                stream_expires_at = self._extract_stream_expires_at(stream_url)
+                if stream_expires_at <= 0:
+                    stream_expires_at = time.time() + 180
+
+                return QueueTrack(
+                    identifier=identifier,
+                    title=title,
+                    author="YouTube",
+                    duration_ms=duration_ms,
+                    webpage_url=resolved_link,
+                    stream_url=stream_url,
+                    thumbnail_url=thumbnail_url,
+                    requester_id=requester_id,
+                    search_query=query.strip(),
+                    lookup_key=self._normalize_lookup_key(query.strip()),
+                    original_input=query.strip(),
+                    stream_expires_at=stream_expires_at,
+                    play_attempts=0,
+                    resolved_at=time.time(),
+                    source="ytmp3.gg",
+                )
+            except Exception as exc:
+                last_error = exc
+            if candidate_index < len(resolved_links):
+                LOGGER.info(
+                    "Resolve falhou para candidato atual; tentando próximo (guild=%s).",
+                    guild_id,
+                )
+
+        if last_error is None:
+            raise RuntimeError("Não consegui resolver essa faixa no YTMP3.")
+        raise RuntimeError(str(last_error)) from last_error
 
     def _is_stream_expired_or_near_expire(self, track: QueueTrack) -> bool:
         if track.stream_expires_at <= 0:
@@ -1028,239 +795,44 @@ class MusicCog(commands.Cog):
         return any(marker in text for marker in markers)
 
     @staticmethod
-    def _is_timeout_ytdlp_error(exc: Exception) -> bool:
-        return "timeout ao consultar yt-dlp" in str(exc).strip().lower()
-
-    @staticmethod
-    def _is_requested_format_error(exc: Exception) -> bool:
-        return "requested format is not available" in str(exc).strip().lower()
-
-    def _build_ytdlp_context(
-        self,
-        *,
-        identifier: str,
-        playback: bool,
-        format_selector: str | None,
-        apply_format: bool,
-    ) -> tuple[str, dict[str, Any]]:
-        if yt_dlp is None:
-            raise RuntimeError("yt-dlp (python) não está instalado.")
-
-        is_search_identifier = identifier.strip().lower().startswith("ytsearch")
-        args: list[str] = [
-            "--ignore-config",
-            "--js-runtimes",
-            self._ytdlp_runtime(),
-            "-q",
-            "--no-warnings",
-            "--skip-download",
-        ]
-
-        cookies_path = self._ytdlp_cookies_path()
-        if cookies_path and os.path.exists(cookies_path):
-            args.extend(["--cookies", cookies_path])
-
-        if playback and apply_format:
-            selector = (format_selector or YTDLP_PRIMARY_FORMAT_SELECTOR).strip()
-            if selector:
-                args.extend(["-f", selector])
-            args.append("--no-playlist")
-
-        if not playback:
-            if is_search_identifier:
-                args.append("--flat-playlist")
-            else:
-                args.extend(["--flat-playlist", "--no-playlist"])
-
-        args.extend(["--", identifier])
-        _, _, urls, ydl_options = yt_dlp.parse_options(args)
-        if not urls:
-            raise RuntimeError("yt-dlp não retornou URL/identificador para resolver.")
-
-        # Keep API behavior deterministic and avoid filesystem cache side effects.
-        ydl_options["cachedir"] = False
-        ydl_options["socket_timeout"] = YTDLP_RESOLVE_TIMEOUT_SECONDS
-        ydl_options["ignoreerrors"] = False
-        return urls[0], ydl_options
-
-    @staticmethod
-    def _extract_info_with_ytdlp_sync(identifier: str, options: dict[str, Any]) -> dict[str, Any]:
-        if yt_dlp is None:
-            raise RuntimeError("yt-dlp (python) não está instalado.")
-
-        with yt_dlp.YoutubeDL(options) as ydl:
-            result = ydl.extract_info(identifier, download=False)
-
-        if not isinstance(result, dict):
-            raise RuntimeError("yt-dlp retornou payload inválido.")
-        return result
-
-    async def _run_ytdlp_json(
-        self,
-        identifier: str,
-        *,
-        playback: bool,
-        format_selector: str | None = None,
-        apply_format: bool = True,
-        command_timeout: float | None = None,
-    ) -> dict[str, Any]:
-        started_at = asyncio.get_running_loop().time()
-        log_identifier = identifier[:120]
-        is_search_identifier = identifier.strip().lower().startswith("ytsearch")
-
-        if playback:
-            LOGGER.info(
-                "yt-dlp resolve iniciado (modo=playback, format=%s, id=%s).",
-                (format_selector or ("auto" if not apply_format else YTDLP_PRIMARY_FORMAT_SELECTOR)),
-                log_identifier,
-            )
-        elif is_search_identifier:
-            LOGGER.info("yt-dlp resolve iniciado (modo=search, id=%s).", log_identifier)
-        else:
-            LOGGER.info("yt-dlp resolve iniciado (modo=metadata, id=%s).", log_identifier)
-
-        target_identifier, options = self._build_ytdlp_context(
-            identifier=identifier,
-            playback=playback,
-            format_selector=format_selector,
-            apply_format=apply_format,
-        )
-
+    def _extract_stream_http_status(exc: Exception | str) -> int | None:
+        match = STREAM_HTTP_STATUS_RE.search(str(exc))
+        if match is None:
+            return None
         try:
-            default_timeout = YTDLP_PLAYBACK_TIMEOUT_SECONDS if playback else YTDLP_SEARCH_TIMEOUT_SECONDS
-            if not playback and not is_search_identifier:
-                default_timeout = YTDLP_RESOLVE_TIMEOUT_SECONDS
-            timeout_value = default_timeout
-            if command_timeout is not None:
-                timeout_value = max(1.0, min(float(command_timeout), default_timeout))
-            data = await asyncio.wait_for(
-                asyncio.to_thread(self._extract_info_with_ytdlp_sync, target_identifier, options),
-                timeout=timeout_value,
-            )
-        except asyncio.TimeoutError:
-            elapsed = asyncio.get_running_loop().time() - started_at
-            LOGGER.warning("yt-dlp timeout após %.2fs (id=%s).", elapsed, log_identifier)
-            raise RuntimeError("Timeout ao consultar yt-dlp.") from None
-        except Exception as exc:
-            detail = self._truncate_for_log(str(exc) or "sem detalhe")
-            elapsed = asyncio.get_running_loop().time() - started_at
-            LOGGER.warning(
-                "yt-dlp falhou após %.2fs (id=%s).",
-                elapsed,
-                log_identifier,
-            )
-            raise RuntimeError(f"yt-dlp falhou ({detail}).") from exc
-
-        elapsed = asyncio.get_running_loop().time() - started_at
-        LOGGER.info("yt-dlp resolve concluído em %.2fs (id=%s).", elapsed, log_identifier)
-        return data
-
-    async def _run_ytdlp_json_with_retry(
-        self,
-        identifier: str,
-        *,
-        playback: bool,
-        format_selector: str | None = None,
-        apply_format: bool = True,
-        deadline: float | None = None,
-        retry_on_timeout: bool = True,
-    ) -> dict[str, Any]:
-        last_exception: Exception | None = None
-        attempts = (YTDLP_PLAYBACK_RETRIES + 1) if (playback and retry_on_timeout) else 1
-        log_identifier = identifier[:120]
-
-        for attempt in range(1, attempts + 1):
-            remaining: float | None = None
-            if deadline is not None:
-                remaining = deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    message = "Sem tempo restante para novas tentativas de resolução."
-                    LOGGER.warning("%s (id=%s).", message, log_identifier)
-                    raise RuntimeError(message)
-
-            if playback:
-                LOGGER.info(
-                    "Tentando resolve playback (tentativa %s/%s, id=%s).",
-                    attempt,
-                    attempts,
-                    log_identifier,
-                )
-
-            try:
-                return await self._run_ytdlp_json(
-                    identifier,
-                    playback=playback,
-                    format_selector=format_selector,
-                    apply_format=apply_format,
-                    command_timeout=remaining,
-                )
-            except Exception as exc:
-                last_exception = exc
-                is_timeout_error = self._is_timeout_ytdlp_error(exc)
-                LOGGER.warning(
-                    "Tentativa de resolve falhou (tentativa %s/%s, id=%s, timeout=%s): %s",
-                    attempt,
-                    attempts,
-                    log_identifier,
-                    is_timeout_error,
-                    self._truncate_for_log(str(exc), 220),
-                )
-                if attempt < attempts and is_timeout_error and retry_on_timeout:
-                    await asyncio.sleep(0.2)
-                    continue
-
-        if last_exception is not None:
-            raise last_exception
-        raise RuntimeError("Falha inesperada ao consultar yt-dlp.")
+            return int(match.group(1))
+        except ValueError:
+            return None
 
     @staticmethod
-    def _extract_entries_from_search(data: dict[str, Any]) -> list[dict[str, Any]]:
-        item_type = str(data.get("_type", "")).strip().lower()
-        if item_type == "playlist":
-            entries = data.get("entries")
-            if isinstance(entries, list):
-                return [entry for entry in entries if isinstance(entry, dict)]
-            return []
-
-        return [data]
-
-    def _deduplicate_search_entries(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        deduplicated: list[dict[str, Any]] = []
-        seen: set[str] = set()
-
-        for entry in entries:
-            entry_url = self._entry_candidate_url(entry)
-            if not entry_url:
-                continue
-
-            video_id = self._extract_youtube_video_id(entry_url)
-            key = video_id.lower() if video_id else entry_url.strip().lower()
-            if key in seen:
-                continue
-
-            seen.add(key)
-            deduplicated.append(entry)
-
-        return deduplicated
+    def _max_stream_retry_attempts_for_status(status_code: int | None) -> int:
+        if status_code == 404:
+            return 0
+        if status_code in {429, 502, 503}:
+            return len(STREAM_TRANSIENT_RETRY_DELAYS_SECONDS)
+        if status_code in {401, 410}:
+            return 1
+        return 1
 
     @staticmethod
-    def _is_known_unrecoverable_ytdlp_error(exc: Exception) -> bool:
-        error_text = str(exc).strip().lower()
-        if not error_text:
-            return False
+    def _stream_retry_delay_seconds(status_code: int | None, next_attempt_number: int) -> float:
+        if status_code not in {429, 502, 503}:
+            return 0.0
 
-        markers = (
-            "sign in to confirm you",
-            "this video requires login",
-            "private video",
-            "video unavailable",
-            "members-only",
-            "age-restricted",
-            "only images are available for download",
-            "n challenge solving failed",
-            "nsig extraction failed",
+        index = min(max(next_attempt_number - 1, 0), len(STREAM_TRANSIENT_RETRY_DELAYS_SECONDS) - 1)
+        base_delay = STREAM_TRANSIENT_RETRY_DELAYS_SECONDS[index]
+        if status_code == 429:
+            return base_delay + random.uniform(0.0, STREAM_429_JITTER_MAX_SECONDS)
+        return base_delay
+
+    @staticmethod
+    def _ffmpeg_before_options(guild_id: int) -> str:
+        return (
+            "-reconnect 1 "
+            "-reconnect_streamed 1 "
+            "-reconnect_delay_max 5 "
+            f'-headers "x-guild-id: {guild_id}"'
         )
-        return any(marker in error_text for marker in markers)
 
     def _entry_candidate_url(self, entry: dict[str, Any]) -> str:
         for key in ("webpage_url", "original_url", "url"):
@@ -1269,156 +841,14 @@ class MusicCog(commands.Cog):
                 return value.strip()
 
         identifier = entry.get("id")
-        if isinstance(identifier, str) and YOUTUBE_ID_RE.fullmatch(identifier.strip()):
-            return f"https://www.youtube.com/watch?v={identifier.strip()}"
+        if isinstance(identifier, str):
+            normalized = identifier.strip()
+            if self._is_url(normalized):
+                return normalized
+            if YOUTUBE_ID_RE.fullmatch(normalized):
+                return f"https://www.youtube.com/watch?v={normalized}"
 
         return ""
-
-    def _extract_stream_url_from_resolved(self, resolved: dict[str, Any]) -> str | None:
-        direct_url = resolved.get("url")
-        if isinstance(direct_url, str) and self._is_url(direct_url):
-            return direct_url.strip()
-
-        requested_downloads = resolved.get("requested_downloads")
-        if isinstance(requested_downloads, list):
-            for download in requested_downloads:
-                if not isinstance(download, dict):
-                    continue
-                download_url = download.get("url")
-                if isinstance(download_url, str) and self._is_url(download_url):
-                    return download_url.strip()
-
-                requested_formats = download.get("requested_formats")
-                if isinstance(requested_formats, list):
-                    for fmt in requested_formats:
-                        if not isinstance(fmt, dict):
-                            continue
-                        fmt_url = fmt.get("url")
-                        if isinstance(fmt_url, str) and self._is_url(fmt_url):
-                            acodec = str(fmt.get("acodec") or "").lower()
-                            if acodec and acodec != "none":
-                                return fmt_url.strip()
-
-        requested_formats = resolved.get("requested_formats")
-        if isinstance(requested_formats, list):
-            for fmt in requested_formats:
-                if not isinstance(fmt, dict):
-                    continue
-                fmt_url = fmt.get("url")
-                if isinstance(fmt_url, str) and self._is_url(fmt_url):
-                    acodec = str(fmt.get("acodec") or "").lower()
-                    if acodec and acodec != "none":
-                        return fmt_url.strip()
-
-        formats = resolved.get("formats")
-        if not isinstance(formats, list):
-            return None
-
-        best_url: str | None = None
-        best_score = float("-inf")
-        for fmt in formats:
-            if not isinstance(fmt, dict):
-                continue
-
-            fmt_url = fmt.get("url")
-            if not isinstance(fmt_url, str) or not self._is_url(fmt_url):
-                continue
-
-            acodec = str(fmt.get("acodec") or "").lower()
-            if not acodec or acodec == "none":
-                continue
-
-            protocol = str(fmt.get("protocol") or "").lower()
-            if protocol and not any(tag in protocol for tag in ("http", "https", "m3u8")):
-                continue
-
-            ext = str(fmt.get("ext") or "").lower()
-            abr = float(fmt.get("abr")) if isinstance(fmt.get("abr"), (int, float)) else 0.0
-            tbr = float(fmt.get("tbr")) if isinstance(fmt.get("tbr"), (int, float)) else 0.0
-
-            ext_bonus = 5.0 if ext in {"m4a", "webm", "mp4"} else 0.0
-            protocol_bonus = 2.0 if protocol.startswith(("http", "https")) else 1.0
-            score = (abr * 10.0) + tbr + ext_bonus + protocol_bonus
-
-            if score > best_score:
-                best_score = score
-                best_url = fmt_url.strip()
-
-        return best_url
-
-    def _build_queue_track(
-        self,
-        *,
-        query: str,
-        requester_id: int,
-        entry: dict[str, Any],
-        resolved: dict[str, Any],
-        stream_url_override: str | None = None,
-    ) -> QueueTrack:
-        stream_url_raw = stream_url_override if stream_url_override is not None else resolved.get("url")
-        stream_url = stream_url_raw.strip() if isinstance(stream_url_raw, str) else ""
-        if not self._is_url(stream_url):
-            raise RuntimeError("yt-dlp não retornou URL de stream válida.")
-
-        entry_url = self._entry_candidate_url(entry)
-        page_url_raw = resolved.get("webpage_url")
-        if isinstance(page_url_raw, str) and self._is_url(page_url_raw):
-            webpage_url = page_url_raw.strip()
-        elif self._is_url(entry_url):
-            webpage_url = entry_url
-        else:
-            webpage_url = stream_url
-
-        identifier_raw = resolved.get("id")
-        if isinstance(identifier_raw, str) and identifier_raw.strip():
-            identifier = identifier_raw.strip()
-        else:
-            fallback_id = entry.get("id")
-            identifier = fallback_id.strip() if isinstance(fallback_id, str) else ""
-
-        title_candidates = [resolved.get("title"), entry.get("title"), "Faixa desconhecida"]
-        title = next((str(value).strip() for value in title_candidates if isinstance(value, str) and str(value).strip()), "Faixa desconhecida")
-
-        author_candidates = [
-            resolved.get("uploader"),
-            resolved.get("channel"),
-            entry.get("uploader"),
-            entry.get("channel"),
-            "Desconhecido",
-        ]
-        author = next((str(value).strip() for value in author_candidates if isinstance(value, str) and str(value).strip()), "Desconhecido")
-
-        duration_value = resolved.get("duration")
-        if not isinstance(duration_value, (int, float)):
-            duration_value = entry.get("duration")
-        duration_ms: int | None
-        if isinstance(duration_value, (int, float)):
-            duration_ms = int(float(duration_value) * 1000)
-        else:
-            duration_ms = None
-
-        thumb_candidates = [resolved.get("thumbnail"), entry.get("thumbnail")]
-        thumbnail_url = next(
-            (
-                str(value).strip()
-                for value in thumb_candidates
-                if isinstance(value, str) and self._is_url(str(value).strip())
-            ),
-            None,
-        )
-
-        return QueueTrack(
-            identifier=identifier,
-            title=title,
-            author=author,
-            duration_ms=duration_ms,
-            webpage_url=webpage_url,
-            stream_url=stream_url,
-            thumbnail_url=thumbnail_url,
-            requester_id=requester_id,
-            search_query=query.strip(),
-            source="youtube",
-        )
 
     async def _resolve_query_to_track(
         self,
@@ -1445,7 +875,7 @@ class MusicCog(commands.Cog):
                 return cached
 
         LOGGER.info(
-            "Resolve iniciado via API local (guild=%s, requester=%s, key=%s, force_refresh=%s).",
+            "Resolve iniciado via YTMP3 (guild=%s, requester=%s, key=%s, force_refresh=%s).",
             guild_id,
             requester_id,
             lookup_key[:96],
@@ -1457,7 +887,7 @@ class MusicCog(commands.Cog):
             task = self._resolve_inflight.get(lookup_key)
             if task is None:
                 task = asyncio.create_task(
-                    self._resolve_from_api(sanitized, guild_id, requester_id),
+                    self._resolve_from_ytmp3(sanitized, guild_id, requester_id),
                     name=f"music-resolve-{guild_id}-{lookup_key[:32]}",
                 )
                 self._resolve_inflight[lookup_key] = task
@@ -1480,7 +910,6 @@ class MusicCog(commands.Cog):
                 original_input=base_track.original_input.strip() or sanitized,
                 lookup_key=lookup_key,
                 play_attempts=0,
-                prefetch_state="idle",
             )
             self._resolve_cache[lookup_key] = ResolveCacheEntry(
                 track=cached_track,
@@ -1490,7 +919,7 @@ class MusicCog(commands.Cog):
 
         elapsed = asyncio.get_running_loop().time() - started_at
         LOGGER.info(
-            "Resolve concluído via API local (guild=%s, key=%s, elapsed=%.2fs).",
+            "Resolve concluído via YTMP3 (guild=%s, key=%s, elapsed=%.2fs).",
             guild_id,
             lookup_key[:96],
             elapsed,
@@ -1503,7 +932,6 @@ class MusicCog(commands.Cog):
             original_input=base_track.original_input.strip() or sanitized,
             lookup_key=lookup_key,
             play_attempts=0,
-            prefetch_state="idle",
         )
 
     async def _connect_to_member_channel(
@@ -1572,6 +1000,68 @@ class MusicCog(commands.Cog):
             return False, f"Você precisa estar em **{bot_channel.name}** para controlar a música."
         return True, None
 
+    async def _try_recover_stream_failure(
+        self,
+        *,
+        state: GuildMusicState,
+        track: QueueTrack,
+        guild_id: int,
+        error: Exception | str,
+    ) -> bool:
+        if not self._is_likely_stream_retryable_error(error):
+            return False
+
+        status_code = self._extract_stream_http_status(error)
+        max_attempts = self._max_stream_retry_attempts_for_status(status_code)
+        if max_attempts <= 0:
+            LOGGER.info(
+                "Falha de stream sem retry por política (guild=%s, track=%s, status=%s).",
+                guild_id,
+                (track.identifier or "")[:40],
+                status_code,
+            )
+            return False
+
+        if track.play_attempts >= max_attempts:
+            LOGGER.info(
+                "Falha de stream acima do limite de tentativas (guild=%s, track=%s, status=%s, attempts=%s/%s).",
+                guild_id,
+                (track.identifier or "")[:40],
+                status_code,
+                track.play_attempts,
+                max_attempts,
+            )
+            return False
+
+        next_attempt = track.play_attempts + 1
+        retry_delay = self._stream_retry_delay_seconds(status_code, next_attempt)
+        if retry_delay > 0:
+            await asyncio.sleep(retry_delay)
+
+        retry_track = replace(track, play_attempts=next_attempt)
+        try:
+            refreshed = await self._refresh_track_if_needed(
+                retry_track,
+                guild_id,
+                force_refresh=True,
+            )
+        except Exception as exc:
+            LOGGER.warning(
+                "Falha ao renovar stream após erro (guild=%s, track=%s, status=%s).",
+                guild_id,
+                (track.identifier or "")[:40],
+                status_code,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            return False
+
+        state.queue.appendleft(refreshed)
+        await self._send_music_message(
+            state.announce_channel_id,
+            f"Falha temporária no stream (status {status_code or 'desconhecido'}). Tentando novamente.",
+        )
+        return True
+
     async def _refresh_track_if_needed(
         self,
         track: QueueTrack,
@@ -1588,7 +1078,7 @@ class MusicCog(commands.Cog):
             raise RuntimeError("Faixa sem referência para renovar stream.")
 
         LOGGER.info(
-            "Renovando stream_url via API (guild=%s, id=%s, force=%s).",
+            "Renovando stream_url via YTMP3 (guild=%s, id=%s, force=%s).",
             guild_id,
             (track.identifier or "")[:48],
             force_refresh,
@@ -1602,7 +1092,6 @@ class MusicCog(commands.Cog):
         return replace(
             refreshed,
             play_attempts=track.play_attempts,
-            prefetch_state="idle",
         )
 
     async def _play_next(self, guild_id: int) -> bool:
@@ -1660,13 +1149,11 @@ class MusicCog(commands.Cog):
                     )
                     continue
 
-                await self._prefetch_track(track, guild_id, wait_for_warmup=True)
-
                 try:
                     source = discord.FFmpegPCMAudio(
                         track.stream_url,
                         executable=ffmpeg_path,
-                        before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+                        before_options=self._ffmpeg_before_options(guild_id),
                         options="-vn",
                     )
                     wrapped = discord.PCMVolumeTransformer(source, volume=state.volume_percent / 100)
@@ -1677,22 +1164,14 @@ class MusicCog(commands.Cog):
                         guild_id,
                         exc_info=(type(exc), exc, exc.__traceback__),
                     )
-                    if self._is_likely_stream_retryable_error(exc) and track.play_attempts < 1:
-                        retry_track = replace(track, play_attempts=track.play_attempts + 1, prefetch_state="idle")
-                        try:
-                            retry_track = await self._refresh_track_if_needed(
-                                retry_track,
-                                guild_id,
-                                force_refresh=True,
-                            )
-                            state.queue.appendleft(retry_track)
-                            await self._send_music_message(
-                                state.announce_channel_id,
-                                "Falha temporária no stream; renovando URL e tentando novamente.",
-                            )
-                            continue
-                        except Exception:
-                            pass
+                    recovered = await self._try_recover_stream_failure(
+                        state=state,
+                        track=track,
+                        guild_id=guild_id,
+                        error=exc,
+                    )
+                    if recovered:
+                        continue
                     await self._send_music_message(
                         state.announce_channel_id,
                         "Falha ao preparar a faixa para reprodução. Tentando a próxima da fila.",
@@ -1730,22 +1209,14 @@ class MusicCog(commands.Cog):
                     )
                     state.current = None
                     state.current_source = None
-                    if self._is_likely_stream_retryable_error(exc) and track.play_attempts < 1:
-                        retry_track = replace(track, play_attempts=track.play_attempts + 1, prefetch_state="idle")
-                        try:
-                            retry_track = await self._refresh_track_if_needed(
-                                retry_track,
-                                guild_id,
-                                force_refresh=True,
-                            )
-                            state.queue.appendleft(retry_track)
-                            await self._send_music_message(
-                                state.announce_channel_id,
-                                "Falha temporária no stream; renovando URL e tentando novamente.",
-                            )
-                            continue
-                        except Exception:
-                            pass
+                    recovered = await self._try_recover_stream_failure(
+                        state=state,
+                        track=track,
+                        guild_id=guild_id,
+                        error=exc,
+                    )
+                    if recovered:
+                        continue
                     await self._send_music_message(
                         state.announce_channel_id,
                         "Não consegui iniciar essa faixa agora. Tentando a próxima.",
@@ -1763,7 +1234,6 @@ class MusicCog(commands.Cog):
                     (track.identifier or "")[:40],
                     len(state.queue),
                 )
-                self._schedule_prefetch_next(state)
                 return True
 
             state.current = None
@@ -1786,34 +1256,14 @@ class MusicCog(commands.Cog):
                 guild_id,
                 exc_info=(type(error), error, error.__traceback__),
             )
-            if (
-                finished_track is not None
-                and self._is_likely_stream_retryable_error(error)
-                and finished_track.play_attempts < 1
-            ):
-                retry_track = replace(
-                    finished_track,
-                    play_attempts=finished_track.play_attempts + 1,
-                    prefetch_state="idle",
+            if finished_track is not None:
+                recovered = await self._try_recover_stream_failure(
+                    state=state,
+                    track=finished_track,
+                    guild_id=guild_id,
+                    error=error,
                 )
-                try:
-                    refreshed = await self._refresh_track_if_needed(
-                        retry_track,
-                        guild_id,
-                        force_refresh=True,
-                    )
-                    state.queue.appendleft(refreshed)
-                    await self._send_music_message(
-                        state.announce_channel_id,
-                        "A stream falhou durante a reprodução. Atualizei a URL e vou tentar novamente.",
-                    )
-                except Exception as exc:
-                    LOGGER.warning(
-                        "Falha ao renovar stream após erro de playback (guild=%s, id=%s).",
-                        guild_id,
-                        (finished_track.identifier or "")[:40],
-                        exc_info=(type(exc), exc, exc.__traceback__),
-                    )
+                if not recovered:
                     await self._send_music_message(
                         state.announce_channel_id,
                         "Falha durante a reprodução da faixa atual. Tentando a próxima da fila.",
@@ -1837,7 +1287,7 @@ class MusicCog(commands.Cog):
 
     @music.command(
         name="setup",
-        description="Diagnostica dependências de áudio local (FFmpeg, voz e API de música).",
+        description="Diagnostica dependências de áudio local (FFmpeg, voz e endpoints de streaming).",
     )
     async def music_setup(self, interaction: discord.Interaction) -> None:
         issues = await self._dependency_issues(include_api_probe=True)
@@ -1845,7 +1295,8 @@ class MusicCog(commands.Cog):
         status_lines = [
             f"PyNaCl: {'OK' if nacl is not None else 'FALHOU'}",
             f"FFmpeg: {self._ffmpeg_path()}",
-            f"Music API: {self._music_api_base_url()}",
+            f"YTMP3 Search: {self._ytmp3_search_base_url()}",
+            f"YTMP3 Download API: {self._ytmp3_download_api_url()}",
         ]
 
         if issues:
@@ -1863,7 +1314,7 @@ class MusicCog(commands.Cog):
             interaction,
             "Diagnóstico de música:\n"
             + "\n".join(f"- {line}" for line in status_lines)
-            + "\n\nTudo pronto para tocar áudio com a API local de streaming.",
+            + "\n\nTudo pronto para tocar áudio com o fluxo de streaming YTMP3.",
             ephemeral=True,
         )
 

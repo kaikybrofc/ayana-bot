@@ -27,9 +27,9 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 ### 🎵 Sistema de Música
 - **Player em Canal de Voz**: Comandos slash para conectar, tocar, pausar, retomar e sair do canal.
 - **Fila por Servidor**: Gerenciamento de músicas em memória com skip, stop e visualização da queue.
-- **Busca + Resolve + Stream via API**: Integração com `yt-dls` (`/search`, `/resolve`, `/stream` e `/prefetch`).
-- **Baixa Latência**: Uso de prefetch para aquecer stream e iniciar playback mais rápido.
-- **Diagnóstico Rápido**: `/music setup` valida `ffmpeg`, API de música e stack de voz (`PyNaCl`/`davey`).
+- **Scrape YTMP3**: Busca e conversão de áudio usando endpoints públicos YTMP3.
+- **Renovação de Stream**: Re-resolve automático quando a URL de áudio expira.
+- **Diagnóstico Rápido**: `/music setup` valida `ffmpeg`, endpoints YTMP3 e stack de voz (`PyNaCl`/`davey`).
 
 ### 🖼️ Integração NekoSia
 - **Busca de Imagens**: Acesso à API NekoSia com filtros por categoria, tags e animes.
@@ -48,7 +48,7 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 - **Framework**: [Discord.py 2.4](https://discordpy.readthedocs.io/)
 - **Banco de Dados**: [MySQL](https://www.mysql.com/) / [aiomysql](https://github.com/aio-libs/aiomysql)
 - **Processamento de Imagem**: [Pillow](https://python-pillow.org/) & [Pilmoji](https://github.com/dtimofeev/pilmoji)
-- **Audio/Streaming**: `discord.py[voice]` (`PyNaCl` + `davey`), `ffmpeg`, API local [`yt-dls`](https://github.com/kaikybrofc/yt-dls).
+- **Audio/Streaming**: `discord.py[voice]` (`PyNaCl` + `davey`), `ffmpeg`, endpoints YTMP3.
 - **Outros**: `aiohttp`, `python-dotenv`, `regex`.
 
 ---
@@ -59,7 +59,7 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
 - Instância do MySQL 8.0+.
 - Token do bot no [Discord Developer Portal](https://discord.com/developers/applications).
 - `ffmpeg` disponível no sistema.
-- API local [`yt-dls`](https://github.com/kaikybrofc/yt-dls) instalada e em execução.
+- Acesso de rede aos endpoints YTMP3 usados no módulo de música.
 
 ---
 
@@ -89,32 +89,13 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
    pip install -r requirements-dev.txt
    ```
 
-4. **Instale e configure a API de música (`yt-dls`):**
-
-   > Repositório oficial: https://github.com/kaikybrofc/yt-dls
-
-   ```bash
-   # Em outro diretório (fora do ayana-bot)
-   git clone https://github.com/kaikybrofc/yt-dls.git
-   cd yt-dls
-
-   npm install
-   npm run install:yt-dlp
-   ```
-
-   Configure o arquivo `cookies.txt` na raiz da API (formato Netscape), conforme instruções do README da própria `yt-dls`.
-
-   Inicie a API:
-   ```bash
-   npm start
-   # ou com PM2:
-   npm run start:pm2
-   ```
-
-   A API padrão sobe em:
-   ```text
-   http://127.0.0.1:3013
-   ```
+4. **Configure os endpoints YTMP3 (opcional):**
+   - Por padrão, o bot usa:
+     - `https://yt-meta.ytconvert.org` (busca)
+     - `https://hub.ytconvert.org/api/download` (conversão/download)
+   - Se precisar customizar, ajuste no `.env`:
+     - `MUSIC_YTMP3_SEARCH_BASE_URL`
+     - `MUSIC_YTMP3_DOWNLOAD_API_URL`
 
 5. **Configure as variáveis de ambiente do bot:**
    Copie o arquivo `.env.example` para `.env` e preencha os campos:
@@ -138,9 +119,10 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
    ENABLE_MEMBERS_INTENT=true
    ENABLE_MESSAGE_CONTENT_INTENT=true
 
-   # Música (bot + API yt-dls)
+   # Música (scrape YTMP3)
    FFMPEG_PATH=ffmpeg
-   MUSIC_API_BASE_URL=http://127.0.0.1:3013
+   MUSIC_YTMP3_SEARCH_BASE_URL=https://yt-meta.ytconvert.org
+   MUSIC_YTMP3_DOWNLOAD_API_URL=https://hub.ytconvert.org/api/download
    ```
 
 6. **Inicie o bot:**
@@ -149,7 +131,7 @@ Um bot multifuncional para Discord desenvolvido em Python, focado em moderação
    ```
 
 7. **Valide a integração de música no Discord:**
-   - Use `/music setup` para checar `ffmpeg` e conectividade com a API.
+   - Use `/music setup` para checar `ffmpeg` e conectividade com os endpoints YTMP3.
    - Use `/music play` com URL ou nome da música.
 
 ---
@@ -232,7 +214,7 @@ O bot oferece comandos extensivos de configuração para administradores:
 | `/help` | Utilitários | Lista todos os comandos ou detalhes de um específico. |
 | `/rank` | Nível | Mostra seu cartão de nível e XP atual. |
 | `/leaderboard`| Nível | Exibe o ranking de XP do servidor em imagem. |
-| `/music play` | Música | Busca no `/search`, resolve no `/resolve` e toca via `/stream`. |
+| `/music play` | Música | Busca/converte via YTMP3 e toca no canal de voz. |
 | `/music queue` | Música | Mostra música atual e próximas faixas da fila. |
 | `/music pause` | Música | Pausa a música atual (mesmo canal de voz do bot). |
 | `/music resume` | Música | Retoma a reprodução pausada. |
