@@ -26,7 +26,7 @@ class WelcomeCog(commands.Cog):
     def _warn_store(self):
         warn_store = getattr(self.bot, "warn_store", None)
         if warn_store is None:
-            raise RuntimeError("WarnStore nao inicializado.")
+            raise RuntimeError("WarnStore não inicializado.")
         return warn_store
 
     def _invalidate_settings_cache(self, guild_id: int) -> None:
@@ -139,13 +139,13 @@ class WelcomeCog(commands.Cog):
     @staticmethod
     def _can_assign_role(guild: discord.Guild, role: discord.Role) -> tuple[bool, str | None]:
         if role.is_default():
-            return False, "Nao use @everyone como cargo automatico."
+            return False, "Não use @everyone como cargo automático."
         if role.managed:
-            return False, "Esse cargo e gerenciado por integracao e nao pode ser atribuido manualmente."
+            return False, "Esse cargo e gerenciado por integracao e não pode ser atribuido manualmente."
 
         me = guild.me
         if me is None:
-            return False, "Nao consegui validar a hierarquia de cargos do bot."
+            return False, "Não consegui validar a hierarquia de cargos do bot."
         if role >= me.top_role:
             return False, "Esse cargo esta acima (ou igual) ao meu maior cargo."
         return True, None
@@ -169,7 +169,7 @@ class WelcomeCog(commands.Cog):
                 continue
             if role >= me.top_role:
                 LOGGER.warning(
-                    "Nao foi possivel atribuir cargo automatico por hierarquia. guild=%s role=%s",
+                    "Não foi possível atribuir cargo automático por hierarquia. guild=%s role=%s",
                     guild.id,
                     role.id,
                 )
@@ -182,7 +182,7 @@ class WelcomeCog(commands.Cog):
             return
 
         try:
-            await member.add_roles(*to_add, reason="Welcome: atribuicao automatica de cargo")
+            await member.add_roles(*to_add, reason="Welcome: atribuicao automática de cargo")
         except (discord.Forbidden, discord.HTTPException):
             LOGGER.warning(
                 "Falha ao adicionar cargos automaticos no welcome. guild=%s user=%s",
@@ -229,7 +229,7 @@ class WelcomeCog(commands.Cog):
             settings = await self._get_settings(member.guild.id)
         except Exception as exc:
             LOGGER.error(
-                "Falha ao carregar configuracao de welcome.",
+                "Falha ao carregar configuração de welcome.",
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
             return
@@ -240,7 +240,7 @@ class WelcomeCog(commands.Cog):
         await self._apply_auto_roles(member, settings)
         await self._send_welcome_channel_message(member, settings)
 
-    @app_commands.command(name="welcomesettings", description="Mostra as configuracoes do sistema de boas-vindas.")
+    @app_commands.command(name="welcomesettings", description="Mostra as configurações do sistema de boas-vindas.")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -248,7 +248,7 @@ class WelcomeCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -257,11 +257,11 @@ class WelcomeCog(commands.Cog):
             settings = await self._get_settings(guild.id)
         except Exception as exc:
             LOGGER.error(
-                "Falha ao ler configuracoes de welcome.",
+                "Falha ao ler configurações de welcome.",
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
             await interaction.response.send_message(
-                "Falha ao ler configuracoes no banco de dados.",
+                "Falha ao ler configurações no banco de dados.",
                 ephemeral=True,
             )
             return
@@ -280,8 +280,8 @@ class WelcomeCog(commands.Cog):
             value=(
                 f"Welcome: `{self._bool_status(bool(settings.get('welcome_enabled', False)))}`\n"
                 f"Canal: {channel_text}\n"
-                f"Mencionar usuario: `{self._bool_status(bool(settings.get('welcome_mention_user', True)))}`\n"
-                f"Delete after: `{delete_after}s` (0 = nao apagar)\n"
+                f"Mencionar usuário: `{self._bool_status(bool(settings.get('welcome_mention_user', True)))}`\n"
+                f"Delete after: `{delete_after}s` (0 = não apagar)\n"
                 f"Auto-role(s): {roles_text}"
             ),
             inline=False,
@@ -314,15 +314,15 @@ class WelcomeCog(commands.Cog):
     @app_commands.describe(
         enabled="Liga/desliga o sistema de boas-vindas.",
         channel="Canal de boas-vindas.",
-        auto_role="Cargo automatico para novos membros.",
-        mention_user="Mencionar o usuario na mensagem do canal.",
-        delete_after_seconds="Apagar mensagem apos X segundos (0 nao apaga).",
+        auto_role="Cargo automático para novos membros.",
+        mention_user="Mencionar o usuário na mensagem do canal.",
+        delete_after_seconds="Apagar mensagem apos X segundos (0 não apaga).",
         dm_enabled="(Desativado) mantido apenas por compatibilidade.",
         message="Template da mensagem no canal.",
         dm_message="(Desativado) mantido apenas por compatibilidade.",
         clear_channel="Limpar canal de boas-vindas configurado.",
-        clear_auto_role="Limpar cargo automatico configurado.",
-        reset_message="Voltar mensagem do canal para o padrao.",
+        clear_auto_role="Limpar cargo automático configurado.",
+        reset_message="Voltar mensagem do canal para o padrão.",
         reset_dm_message="(Desativado) mantido apenas por compatibilidade.",
     )
     async def setwelcome(
@@ -344,32 +344,32 @@ class WelcomeCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
 
         if clear_channel and channel is not None:
             await interaction.response.send_message(
-                "Nao use `channel` junto com `clear_channel`.",
+                "Não use `channel` junto com `clear_channel`.",
                 ephemeral=True,
             )
             return
         if clear_auto_role and auto_role is not None:
             await interaction.response.send_message(
-                "Nao use `auto_role` junto com `clear_auto_role`.",
+                "Não use `auto_role` junto com `clear_auto_role`.",
                 ephemeral=True,
             )
             return
         if reset_message and message is not None:
             await interaction.response.send_message(
-                "Nao use `message` junto com `reset_message`.",
+                "Não use `message` junto com `reset_message`.",
                 ephemeral=True,
             )
             return
         if reset_dm_message and dm_message is not None:
             await interaction.response.send_message(
-                "Nao use `dm_message` junto com `reset_dm_message`.",
+                "Não use `dm_message` junto com `reset_dm_message`.",
                 ephemeral=True,
             )
             return
@@ -390,7 +390,7 @@ class WelcomeCog(commands.Cog):
         elif auto_role is not None:
             can_assign, reason = self._can_assign_role(guild, auto_role)
             if not can_assign:
-                await interaction.response.send_message(reason or "Cargo invalido.", ephemeral=True)
+                await interaction.response.send_message(reason or "Cargo inválido.", ephemeral=True)
                 return
             updates["welcome_auto_role_ids"] = [auto_role.id]
 
@@ -406,7 +406,7 @@ class WelcomeCog(commands.Cog):
             clean_message = message.strip()
             if not clean_message:
                 await interaction.response.send_message(
-                    "A mensagem de welcome nao pode ser vazia.",
+                    "A mensagem de welcome não pode ser vazia.",
                     ephemeral=True,
                 )
                 return
@@ -418,7 +418,7 @@ class WelcomeCog(commands.Cog):
 
         if not updates:
             await interaction.response.send_message(
-                "Informe pelo menos uma configuracao para atualizar.",
+                "Informe pelo menos uma configuração para atualizar.",
                 ephemeral=True,
             )
             return
@@ -427,11 +427,11 @@ class WelcomeCog(commands.Cog):
             settings = await self._update_settings(guild.id, **updates)
         except Exception as exc:
             LOGGER.error(
-                "Falha ao atualizar configuracoes de welcome.",
+                "Falha ao atualizar configurações de welcome.",
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
             await interaction.response.send_message(
-                "Falha ao salvar configuracoes no banco de dados.",
+                "Falha ao salvar configurações no banco de dados.",
                 ephemeral=True,
             )
             return
@@ -447,7 +447,7 @@ class WelcomeCog(commands.Cog):
                 f"Status: `{self._bool_status(bool(settings.get('welcome_enabled', False)))}`\n"
                 f"Canal: {channel_text}\n"
                 f"Auto-role(s): {roles_text}\n"
-                f"Mencionar usuario: `{self._bool_status(bool(settings.get('welcome_mention_user', True)))}`\n"
+                f"Mencionar usuário: `{self._bool_status(bool(settings.get('welcome_mention_user', True)))}`\n"
                 f"Delete after: `{delete_after}s`\n"
                 "DM: `Desligado (fixo)`\n"
                 + (
@@ -463,7 +463,7 @@ class WelcomeCog(commands.Cog):
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.checks.has_permissions(manage_guild=True)
-    @app_commands.describe(member="Membro para simular a mensagem. Padrao: voce.")
+    @app_commands.describe(member="Membro para simular a mensagem. Padrao: você.")
     async def welcometest(
         self,
         interaction: discord.Interaction,
@@ -472,7 +472,7 @@ class WelcomeCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -483,7 +483,7 @@ class WelcomeCog(commands.Cog):
                 target = interaction.user
             else:
                 await interaction.response.send_message(
-                    "Nao consegui identificar um membro para o preview.",
+                    "Não consegui identificar um membro para o preview.",
                     ephemeral=True,
                 )
                 return
@@ -504,7 +504,7 @@ class WelcomeCog(commands.Cog):
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
             await interaction.response.send_message(
-                "Falha ao carregar configuracao de welcome.",
+                "Falha ao carregar configuração de welcome.",
                 ephemeral=True,
             )
             return
@@ -529,7 +529,7 @@ class WelcomeCog(commands.Cog):
             )
         except (discord.Forbidden, discord.HTTPException):
             await interaction.followup.send(
-                "Nao consegui enviar o preview neste canal.",
+                "Não consegui enviar o preview neste canal.",
                 ephemeral=True,
             )
             return

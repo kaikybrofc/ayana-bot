@@ -67,7 +67,7 @@ def parse_positive_int(raw_value: str | None, var_name: str, default: int) -> in
     try:
         parsed = int(normalized)
     except ValueError as exc:
-        raise RuntimeError(f"{var_name} deve ser um numero inteiro positivo.") from exc
+        raise RuntimeError(f"{var_name} deve ser um número inteiro positivo.") from exc
 
     if parsed <= 0:
         raise RuntimeError(f"{var_name} deve ser maior que zero.")
@@ -98,9 +98,9 @@ def load_mysql_config_from_env() -> MySQLConfig:
     pool_limit = parse_positive_int(os.getenv("DB_POOL_LIMIT"), "DB_POOL_LIMIT", default=10)
 
     if not user:
-        raise RuntimeError("A variavel DB_USER nao foi encontrada no .env.")
+        raise RuntimeError("A variável DB_USER não foi encontrada no .env.")
     if not database:
-        raise RuntimeError("A variavel DB_NAME nao foi encontrada no .env.")
+        raise RuntimeError("A variável DB_NAME não foi encontrada no .env.")
 
     return MySQLConfig(
         host=host,
@@ -119,7 +119,7 @@ async def send_ephemeral(interaction: discord.Interaction, message: str) -> None
         else:
             await interaction.response.send_message(message, ephemeral=True)
     except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-        LOGGER.warning("Nao foi possivel responder a interacao (expirada, sem permissao ou canal removido).")
+        LOGGER.warning("Não foi possível responder à interação (expirada, sem permissão ou canal removido).")
 
 
 def setup_logging() -> None:
@@ -204,7 +204,7 @@ class AyanaBot(commands.Bot):
                 removed_count += 1
             except discord.HTTPException:
                 LOGGER.warning(
-                    "Nao foi possivel remover comando global '%s' (id=%s).",
+                    "Não foi possível remover o comando global '%s' (id=%s).",
                     global_command.name,
                     global_command.id,
                 )
@@ -221,7 +221,7 @@ class AyanaBot(commands.Bot):
 
         for extension in EXTENSIONS:
             await self.load_extension(extension)
-            LOGGER.info("Extensao carregada: %s", extension)
+            LOGGER.info("Extensão carregada: %s", extension)
 
         try:
             if self.sync_guild_id:
@@ -236,7 +236,7 @@ class AyanaBot(commands.Bot):
                 )
                 if removed_globals:
                     LOGGER.info(
-                        "Comandos globais removidos para evitar duplicacao na guild: %s",
+                        "Comandos globais removidos para evitar duplicação na guild: %s",
                         removed_globals,
                     )
             else:
@@ -305,21 +305,21 @@ class AyanaBot(commands.Bot):
         if isinstance(error, app_commands.MissingPermissions):
             await send_ephemeral(
                 interaction,
-                "Voce nao tem permissao para usar este comando.",
+                "Você não tem permissão para usar este comando.",
             )
             return
 
         if isinstance(error, app_commands.BotMissingPermissions):
             await send_ephemeral(
                 interaction,
-                "Eu nao tenho permissao para executar este comando.",
+                "Eu não tenho permissão para executar este comando.",
             )
             return
 
         if isinstance(error, app_commands.NoPrivateMessage):
             await send_ephemeral(
                 interaction,
-                "Este comando so funciona dentro de servidor.",
+                "Este comando só funciona dentro de um servidor.",
             )
             return
 
@@ -333,14 +333,14 @@ class AyanaBot(commands.Bot):
         if isinstance(error, app_commands.CheckFailure):
             await send_ephemeral(
                 interaction,
-                "Voce nao passou na validacao deste comando.",
+                "Você não passou na validação deste comando.",
             )
             return
 
         root_error = error.original if isinstance(error, app_commands.CommandInvokeError) else error
         command_name = interaction.command.qualified_name if interaction.command else "desconhecido"
         LOGGER.error(
-            "Erro nao tratado no comando /%s",
+            "Erro não tratado no comando /%s",
             command_name,
             exc_info=(type(root_error), root_error, root_error.__traceback__),
         )
@@ -371,20 +371,20 @@ def main() -> None:
     mysql_config = load_mysql_config_from_env()
 
     if not token:
-        raise RuntimeError("A variavel DISCORD_TOKEN nao foi encontrada no .env.")
+        raise RuntimeError("A variável DISCORD_TOKEN não foi encontrada no .env.")
     if not looks_like_discord_token(token):
-        raise RuntimeError("DISCORD_TOKEN parece invalido. Use o token do Bot em Developer Portal > Bot > Reset Token.")
+        raise RuntimeError("DISCORD_TOKEN parece inválido. Use o token do Bot em Developer Portal > Bot > Reset Token.")
     if os.getenv("GUILD_ID") and guild_id is None:
-        LOGGER.warning("GUILD_ID invalido. Sync sera global.")
+        LOGGER.warning("GUILD_ID inválido. A sincronização será global.")
     if os.getenv("DONO_ID") and owner_id is None:
-        LOGGER.warning("DONO_ID invalido. owner_id nao sera definido.")
+        LOGGER.warning("DONO_ID inválido. owner_id não será definido.")
     if not members_intent_enabled:
         LOGGER.warning(
-            "ENABLE_MEMBERS_INTENT desativado: welcome por entrada e operacoes em massa podem ficar limitados."
+            "ENABLE_MEMBERS_INTENT desativado: boas-vindas por entrada e operações em massa podem ficar limitadas."
         )
     if not message_content_intent_enabled:
         LOGGER.warning(
-            "ENABLE_MESSAGE_CONTENT_INTENT desativado: AutoMod por conteudo e leveling por mensagens ficam limitados."
+            "ENABLE_MESSAGE_CONTENT_INTENT desativado: AutoMod por conteúdo e leveling por mensagens ficam limitados."
         )
 
     bot = AyanaBot(
@@ -398,8 +398,8 @@ def main() -> None:
         bot.run(token, log_handler=None)
     except discord.errors.PrivilegedIntentsRequired as exc:
         raise RuntimeError(
-            "Intents privilegiados nao habilitados no Developer Portal. "
-            "Habilite os intents necessarios no portal ou defina "
+            "Intents privilegiados não habilitados no Developer Portal. "
+            "Habilite os intents necessários no portal ou defina "
             "ENABLE_MEMBERS_INTENT/ENABLE_MESSAGE_CONTENT_INTENT=false no .env."
         ) from exc
 

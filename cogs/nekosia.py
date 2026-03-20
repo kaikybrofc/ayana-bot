@@ -161,7 +161,7 @@ class NekosiaCog(commands.Cog):
         except aiohttp.ClientError as exc:
             raise NekosiaRequestError("Falha ao conectar na API da NekoSia.") from exc
         except ValueError as exc:
-            raise NekosiaRequestError("A API retornou JSON invalido.") from exc
+            raise NekosiaRequestError("A API retornou JSON inválido.") from exc
 
         if not isinstance(data, dict):
             raise NekosiaRequestError("Resposta inesperada da API.")
@@ -312,7 +312,7 @@ class NekosiaCog(commands.Cog):
         count="Quantidade de imagens (1 a 5).",
         additional_tags="Tags extras separadas por virgula.",
         blacklisted_tags="Tags para excluir separadas por virgula.",
-        rating="Filtro de classificacao de conteudo (suggestive exige canal +18).",
+        rating="Filtro de classificacao de conteúdo (suggestive exige canal +18).",
     )
     async def nekosia(
         self,
@@ -336,7 +336,7 @@ class NekosiaCog(commands.Cog):
         normalized_rating = (rating or "safe").strip().lower()
         if normalized_rating not in {"safe", "suggestive"}:
             await interaction.response.send_message(
-                "Rating invalido. Use `safe` ou `suggestive`.",
+                "Rating inválido. Use `safe` ou `suggestive`.",
                 ephemeral=True,
             )
             return
@@ -347,7 +347,7 @@ class NekosiaCog(commands.Cog):
             rating=normalized_rating,
         ) and not self._is_age_restricted_context(interaction):
             await interaction.response.send_message(
-                "Conteudo suggestive/NSFW so pode ser consultado em canal marcado como +18.",
+                "Conteudo suggestive/NSFW só pode ser consultado em canal marcado como +18.",
                 ephemeral=True,
             )
             return
@@ -420,7 +420,7 @@ class NekosiaCog(commands.Cog):
         images = self._extract_images(payload)
         if not images:
             await interaction.followup.send(
-                "A API respondeu, mas nao retornou imagens para os filtros informados.",
+                "A API respondeu, mas não retornou imagens para os filtros informados.",
                 ephemeral=True,
             )
             return
@@ -429,7 +429,7 @@ class NekosiaCog(commands.Cog):
             safe_images = [image for image in images if not _is_age_restricted_rating(_rating_value(image))]
             if not safe_images:
                 await interaction.followup.send(
-                    "A resposta continha apenas conteudo +18 e foi bloqueada neste canal.",
+                    "A resposta continha apenas conteúdo +18 e foi bloqueada neste canal.",
                     ephemeral=True,
                 )
                 return
@@ -484,7 +484,7 @@ class NekosiaCog(commands.Cog):
             image_rating = _rating_value(payload)
             if _is_age_restricted_rating(image_rating):
                 await interaction.followup.send(
-                    "Esta imagem e classificada como +18 e nao pode ser exibida neste canal.",
+                    "Esta imagem e classificada como +18 e não pode ser exibida neste canal.",
                     ephemeral=True,
                 )
                 return
@@ -502,7 +502,7 @@ class NekosiaCog(commands.Cog):
     )
     @app_commands.describe(
         tipo="Conjunto para busca (tags, anime, characters).",
-        termo="Filtro opcional para encontrar itens especificos.",
+        termo="Filtro opcional para encontrar itens específicos.",
     )
     async def nekosia_tags(
         self,
@@ -522,7 +522,7 @@ class NekosiaCog(commands.Cog):
         dataset = catalog.get(tipo, [])
         if not dataset:
             await interaction.followup.send(
-                "Nao encontrei resultados para esse tipo de listagem.",
+                "Não encontrei resultados para esse tipo de listagem.",
                 ephemeral=True,
             )
             return

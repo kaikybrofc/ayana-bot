@@ -52,7 +52,7 @@ class LevelingCog(commands.Cog):
     def _warn_store(self):
         warn_store = getattr(self.bot, "warn_store", None)
         if warn_store is None:
-            raise RuntimeError("WarnStore nao inicializado.")
+            raise RuntimeError("WarnStore não inicializado.")
         return warn_store
 
     @staticmethod
@@ -503,7 +503,7 @@ class LevelingCog(commands.Cog):
         self._ensure_canvas_support()
         width, height = image.size
         if width <= 0 or height <= 0:
-            raise ValueError("Imagem invalida para resize cover.")
+            raise ValueError("Imagem inválida para resize cover.")
         # object-fit: cover + object-position: center
         scale = max(size / width, size / height)
         resized = image.resize(
@@ -720,7 +720,7 @@ class LevelingCog(commands.Cog):
         embed.add_field(name="Posicao", value=f"`#{rank_position}`", inline=True)
         embed.add_field(name="Mensagens com XP", value=f"`{message_count}`", inline=True)
         embed.add_field(
-            name="Progresso do nivel",
+            name="Progresso do nível",
             value=f"`[{progress_bar}] {level_progress}/{level_total_needed}`",
             inline=False,
         )
@@ -802,11 +802,11 @@ class LevelingCog(commands.Cog):
                 )
             )
         embed = discord.Embed(
-            title=f"Leaderboard de niveis - {guild.name}",
+            title=f"Leaderboard de níveis - {guild.name}",
             description="\n".join(lines),
             color=discord.Color.gold(),
         )
-        embed.set_footer(text=f"Top {len(rows)} usuarios")
+        embed.set_footer(text=f"Top {len(rows)} usuários")
         return embed
 
     async def _render_rank_canvas(
@@ -923,7 +923,7 @@ class LevelingCog(commands.Cog):
 
         safe_guild_name = self._normalize_text(guild.name).strip() or "Servidor"
         safe_display_name = self._normalize_text(member.display_name).strip() or "Usuario"
-        safe_handle_name = self._normalize_text(member.name).strip() or "usuario"
+        safe_handle_name = self._normalize_text(member.name).strip() or "usuário"
 
         with self._emoji_renderer(image, draw) as emoji_draw:
             display_name = self._truncate_text(
@@ -1446,15 +1446,15 @@ class LevelingCog(commands.Cog):
         try:
             await message.channel.send(
                 (
-                    f"{message.author.display_name} subiu para o nivel `{level}`. "
-                    f"XP total: `{total_xp}` | Proximo nivel em `{missing_xp}` XP."
+                    f"{message.author.display_name} subiu para o nível `{level}`. "
+                    f"XP total: `{total_xp}` | Proximo nível em `{missing_xp}` XP."
                 ),
                 delete_after=12,
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         except (discord.Forbidden, discord.HTTPException):
             LOGGER.warning(
-                "Falha ao anunciar level up. guild=%s canal=%s usuario=%s",
+                "Falha ao anunciar level up. guild=%s canal=%s usuário=%s",
                 message.guild.id if message.guild else "N/A",
                 message.channel.id,
                 message.author.id,
@@ -1486,9 +1486,9 @@ class LevelingCog(commands.Cog):
         if result.get("leveled_up"):
             await self._announce_level_up(message, result)
 
-    @app_commands.command(name="rank", description="Mostra nivel e XP de um membro.")
+    @app_commands.command(name="rank", description="Mostra nível e XP de um membro.")
     @app_commands.guild_only()
-    @app_commands.describe(member="Membro para consultar. Se vazio, usa voce.")
+    @app_commands.describe(member="Membro para consultar. Se vazio, usa você.")
     async def rank(
         self,
         interaction: discord.Interaction,
@@ -1497,7 +1497,7 @@ class LevelingCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -1505,7 +1505,7 @@ class LevelingCog(commands.Cog):
         if member is None:
             if not isinstance(interaction.user, discord.Member):
                 await interaction.response.send_message(
-                    "Nao consegui identificar voce neste servidor.",
+                    "Não consegui identificar você neste servidor.",
                     ephemeral=True,
                 )
                 return
@@ -1528,7 +1528,7 @@ class LevelingCog(commands.Cog):
 
         if profile is None:
             await interaction.followup.send(
-                f"{member.mention} ainda nao possui XP registrado nesta guilda.",
+                f"{member.mention} ainda não possui XP registrado nesta guilda.",
                 ephemeral=True,
             )
             return
@@ -1575,9 +1575,9 @@ class LevelingCog(commands.Cog):
         )
         await interaction.followup.send(embed=fallback_embed)
 
-    @app_commands.command(name="leaderboard", description="Mostra o ranking de niveis da guilda.")
+    @app_commands.command(name="leaderboard", description="Mostra o ranking de níveis da guilda.")
     @app_commands.guild_only()
-    @app_commands.describe(limit="Quantidade de usuarios no ranking (3 a 20).")
+    @app_commands.describe(limit="Quantidade de usuários no ranking (3 a 20).")
     async def leaderboard(
         self,
         interaction: discord.Interaction,
@@ -1586,7 +1586,7 @@ class LevelingCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -1608,7 +1608,7 @@ class LevelingCog(commands.Cog):
 
         if not rows:
             await interaction.followup.send(
-                "Ainda nao ha usuarios com XP registrado nesta guilda.",
+                "Ainda não há usuários com XP registrado nesta guilda.",
                 ephemeral=True,
             )
             return

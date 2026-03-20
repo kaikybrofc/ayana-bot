@@ -69,7 +69,7 @@ LEVEL_XP_QUADRATIC_STEP = 5
 
 def xp_for_next_level(level: int) -> int:
     safe_level = max(0, int(level))
-    # Curva progressiva: cada nivel exige mais XP que o anterior.
+    # Curva progressiva: cada nível exige mais XP que o anterior.
     return LEVEL_XP_BASE + (LEVEL_XP_LINEAR_STEP * safe_level) + (LEVEL_XP_QUADRATIC_STEP * safe_level * safe_level)
 
 
@@ -125,7 +125,7 @@ class MySQLConfig:
 
     def validate(self) -> None:
         if not DB_IDENTIFIER_RE.fullmatch(self.database):
-            raise ValueError("DB_NAME invalido. Use apenas letras, numeros e underscore (_).")
+            raise ValueError("DB_NAME inválido. Use apenas letras, numeros e underscore (_).")
 
 
 class WarnStore:
@@ -339,7 +339,7 @@ class WarnStore:
     @property
     def pool(self) -> aiomysql.Pool:
         if self._pool is None:
-            raise RuntimeError("MySQL pool nao inicializado.")
+            raise RuntimeError("MySQL pool não inicializado.")
         return self._pool
 
     async def ensure_guild_settings(self, guild_id: int) -> None:
@@ -452,7 +452,7 @@ class WarnStore:
         for field, value in updates.items():
             field_type = SETTINGS_FIELD_TYPES.get(field)
             if field_type is None:
-                raise ValueError(f"Campo de configuracao invalido: {field}")
+                raise ValueError(f"Campo de configuração inválido: {field}")
             clauses.append(f"{field} = %s")
             values.append(self._serialize_setting_value(field_type, value))
 
@@ -962,5 +962,5 @@ class WarnStore:
                 return _serialize_role_ids(_parse_role_ids(value))
             if isinstance(value, (list, tuple, set)):
                 return _serialize_role_ids([int(item) for item in value])
-            raise ValueError("Valor invalido para lista de cargos.")
+            raise ValueError("Valor inválido para lista de cargos.")
         return value

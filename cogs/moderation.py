@@ -111,15 +111,15 @@ class ModerationCog(commands.Cog):
         target: discord.Member,
     ) -> tuple[bool, str | None]:
         if target == actor:
-            return False, "Voce não pode usar este comando em você mesmo."
+            return False, "Você não pode usar este comando em você mesmo."
         if target == guild.owner:
-            return False, "Voce não pode moderar o dono do servidor."
+            return False, "Você não pode moderar o dono do servidor."
         if actor != guild.owner and target.top_role >= actor.top_role:
             return False, "Esse membro tem cargo igual ou superior ao seu."
 
         me = guild.me
         if me is None:
-            return False, "Nao consegui validar minha hierarquia de cargos."
+            return False, "Não consegui validar minha hierarquia de cargos."
         if target.top_role >= me.top_role:
             return False, "Esse membro tem cargo igual ou superior ao meu."
 
@@ -141,18 +141,18 @@ class ModerationCog(commands.Cog):
         role: discord.Role,
     ) -> tuple[bool, str | None]:
         if role.is_default():
-            return False, "Nao use @everyone para esta acao."
+            return False, "Não use @everyone para esta ação."
         if role.managed:
-            return False, "Esse cargo e gerenciado por integracao e nao pode ser atribuido manualmente."
+            return False, "Esse cargo e gerenciado por integracao e não pode ser atribuido manualmente."
 
         if actor != guild.owner and role >= actor.top_role:
-            return False, "Esse cargo tem posicao igual ou superior ao seu maior cargo."
+            return False, "Esse cargo tem posição igual ou superior ao seu maior cargo."
 
         me = guild.me
         if me is None:
-            return False, "Nao consegui validar minha hierarquia de cargos."
+            return False, "Não consegui validar minha hierarquia de cargos."
         if role >= me.top_role:
-            return False, "Esse cargo tem posicao igual ou superior ao meu maior cargo."
+            return False, "Esse cargo tem posição igual ou superior ao meu maior cargo."
         return True, None
 
     async def _collect_members_for_bulk(self, guild: discord.Guild) -> tuple[list[discord.Member], bool]:
@@ -219,7 +219,7 @@ class ModerationCog(commands.Cog):
     def _warn_store(self):
         warn_store = getattr(self.bot, "warn_store", None)
         if warn_store is None:
-            raise RuntimeError("WarnStore nao inicializado.")
+            raise RuntimeError("WarnStore não inicializado.")
         return warn_store
 
     def _should_send_automod_notice(self, guild_id: int, user_id: int) -> bool:
@@ -351,11 +351,11 @@ class ModerationCog(commands.Cog):
             if not self._can_bot_moderate_member(guild, member):
                 return "Escalonamento para ban acionado, mas sem hierarquia suficiente."
 
-            reason = f"Escalonamento automatico: {active_warnings} warns ativos " f"(limite de ban: {ban_threshold})."
+            reason = f"Escalonamento automático: {active_warnings} warns ativos " f"(limite de ban: {ban_threshold})."
             try:
                 await member.ban(reason=reason, delete_message_days=0)
             except (discord.Forbidden, discord.HTTPException):
-                return "Escalonamento para ban falhou por permissao/hierarquia."
+                return "Escalonamento para ban falhou por permissão/hierarquia."
 
             await self._safe_log_infraction(
                 guild_id=guild.id,
@@ -364,7 +364,7 @@ class ModerationCog(commands.Cog):
                 action="auto_ban_warns",
                 reason=reason,
             )
-            return "Ban automatico aplicado por escalonamento."
+            return "Ban automático aplicado por escalonamento."
 
         if timeout_threshold > 0 and active_warnings >= timeout_threshold:
             if member.guild_permissions.administrator:
@@ -376,13 +376,13 @@ class ModerationCog(commands.Cog):
             timeout_delta = min(timedelta(minutes=duration_minutes), timedelta(days=28))
             timed_out_until = discord.utils.utcnow() + timeout_delta
             reason = (
-                f"Escalonamento automatico: {active_warnings} warns ativos "
+                f"Escalonamento automático: {active_warnings} warns ativos "
                 f"(limite de timeout: {timeout_threshold})."
             )
             try:
                 await member.edit(timed_out_until=timed_out_until, reason=reason)
             except (discord.Forbidden, discord.HTTPException):
-                return "Escalonamento para timeout falhou por permissao/hierarquia."
+                return "Escalonamento para timeout falhou por permissão/hierarquia."
 
             await self._safe_log_infraction(
                 guild_id=guild.id,
@@ -392,7 +392,7 @@ class ModerationCog(commands.Cog):
                 reason=reason,
                 expires_at=timed_out_until,
             )
-            return "Timeout automatico aplicado por escalonamento " f"({self._format_minutes(duration_minutes)})."
+            return "Timeout automático aplicado por escalonamento " f"({self._format_minutes(duration_minutes)})."
 
         return None
 
@@ -493,7 +493,7 @@ class ModerationCog(commands.Cog):
             deleted = True
         except (discord.Forbidden, discord.HTTPException):
             LOGGER.warning(
-                "Nao consegui apagar mensagem do AutoMod. guild=%s canal=%s autor=%s",
+                "Não consegui apagar mensagem do AutoMod. guild=%s canal=%s autor=%s",
                 guild.id,
                 message.channel.id,
                 member.id,
@@ -524,7 +524,7 @@ class ModerationCog(commands.Cog):
             )
         except Exception as exc:
             LOGGER.error(
-                "Falha ao registrar warn automatico do AutoMod.",
+                "Falha ao registrar warn automático do AutoMod.",
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
             return
@@ -582,13 +582,13 @@ class ModerationCog(commands.Cog):
         channel = interaction.channel
         if isinstance(channel, discord.ForumChannel):
             await interaction.response.send_message(
-                "Use este comando dentro de uma thread/post do forum, nao no canal de forum.",
+                "Use este comando dentro de uma thread/post do fórum, não no canal de fórum.",
                 ephemeral=True,
             )
             return
         if channel is None or not hasattr(channel, "purge"):
             await interaction.response.send_message(
-                "Este comando so pode ser usado em canais de texto.",
+                "Este comando só pode ser usado em canais de texto.",
                 ephemeral=True,
             )
             return
@@ -601,14 +601,14 @@ class ModerationCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="slowmode", description="Ajusta o modo lento de canal de texto, thread ou forum.")
+    @app_commands.command(name="slowmode", description="Ajusta o modo lento de canal de texto, thread ou fórum.")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_channels=True)
     @app_commands.checks.has_permissions(manage_channels=True)
     @app_commands.checks.bot_has_permissions(manage_channels=True)
     @app_commands.describe(
         tempo="Tempo: 0/off, segundos (30) ou com sufixo (10s, 2m, 1h). Maximo 6h.",
-        canal="Canal alvo. Aceita texto/thread/forum. Se vazio, usa o canal atual.",
+        canal="Canal alvo. Aceita texto/thread/fórum. Se vazio, usa o canal atual.",
     )
     async def slowmode(
         self,
@@ -627,7 +627,7 @@ class ModerationCog(commands.Cog):
         actor = interaction.user
         if guild is None or not isinstance(actor, discord.Member):
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -636,8 +636,8 @@ class ModerationCog(commands.Cog):
         if delay_seconds is None:
             await interaction.response.send_message(
                 (
-                    "Tempo invalido. Use `0`/`off` para desligar, segundos (`30`) "
-                    "ou `s/m/h` (`10s`, `2m`, `1h`). Limite maximo: `6h`."
+                    "Tempo inválido. Use `0`/`off` para desligar, segundos (`30`) "
+                    "ou `s/m/h` (`10s`, `2m`, `1h`). Limite máximo: `6h`."
                 ),
                 ephemeral=True,
             )
@@ -646,21 +646,21 @@ class ModerationCog(commands.Cog):
         target_channel = canal or interaction.channel
         if target_channel is None:
             await interaction.response.send_message(
-                "Nao consegui identificar o canal alvo para aplicar slowmode.",
+                "Não consegui identificar o canal alvo para aplicar slowmode.",
                 ephemeral=True,
             )
             return
 
         if isinstance(target_channel, (discord.StageChannel, discord.VoiceChannel)):
             await interaction.response.send_message(
-                ("Canal de voz/palco nao suporta slowmode de mensagens. " "Use um canal de texto, forum ou thread."),
+                ("Canal de voz/palco não suporta slowmode de mensagens. " "Use um canal de texto, fórum ou thread."),
                 ephemeral=True,
             )
             return
 
         if not isinstance(target_channel, (discord.TextChannel, discord.Thread, discord.ForumChannel)):
             await interaction.response.send_message(
-                "Este canal nao suporta slowmode.",
+                "Este canal não suporta slowmode.",
                 ephemeral=True,
             )
             return
@@ -670,13 +670,13 @@ class ModerationCog(commands.Cog):
             await target_channel.edit(slowmode_delay=delay_seconds, reason=reason)
         except TypeError:
             await interaction.response.send_message(
-                "Este tipo de canal nao aceita configuracao de slowmode.",
+                "Este tipo de canal não aceita configuração de slowmode.",
                 ephemeral=True,
             )
             return
         except discord.Forbidden:
             await interaction.response.send_message(
-                "Nao tenho permissao para ajustar o modo lento nesse canal.",
+                "Não tenho permissão para ajustar o modo lento nesse canal.",
                 ephemeral=True,
             )
             return
@@ -697,14 +697,14 @@ class ModerationCog(commands.Cog):
 
     @app_commands.command(
         name="lockdown",
-        description="Tranca canal de texto/forum ou bloqueia uma thread rapidamente.",
+        description="Tranca canal de texto/fórum ou bloqueia uma thread rapidamente.",
     )
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_channels=True)
     @app_commands.checks.has_permissions(manage_channels=True)
     @app_commands.checks.bot_has_permissions(manage_channels=True)
     @app_commands.describe(
-        canal="Canal para trancar (texto/forum/voice/stage) ou thread. Se vazio, usa o canal atual.",
+        canal="Canal para trancar (texto/fórum/voice/stage) ou thread. Se vazio, usa o canal atual.",
         motivo="Motivo do lockdown.",
     )
     async def lockdown(
@@ -724,7 +724,7 @@ class ModerationCog(commands.Cog):
         actor = interaction.user
         if guild is None or not isinstance(actor, discord.Member):
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -732,7 +732,7 @@ class ModerationCog(commands.Cog):
         target_channel = canal or interaction.channel
         if target_channel is None:
             await interaction.response.send_message(
-                "Nao consegui identificar o canal alvo para o lockdown.",
+                "Não consegui identificar o canal alvo para o lockdown.",
                 ephemeral=True,
             )
             return
@@ -742,7 +742,7 @@ class ModerationCog(commands.Cog):
             (discord.TextChannel, discord.Thread, discord.ForumChannel, discord.StageChannel, discord.VoiceChannel),
         ):
             await interaction.response.send_message(
-                "Esse tipo de canal nao e suportado pelo /lockdown.",
+                "Esse tipo de canal não e suportado pelo /lockdown.",
                 ephemeral=True,
             )
             return
@@ -759,7 +759,7 @@ class ModerationCog(commands.Cog):
                 await target_channel.edit(archived=True, locked=True, reason=audit_reason)
             except discord.Forbidden:
                 await interaction.response.send_message(
-                    "Nao tenho permissao para bloquear essa thread.",
+                    "Não tenho permissão para bloquear essa thread.",
                     ephemeral=True,
                 )
                 return
@@ -783,13 +783,13 @@ class ModerationCog(commands.Cog):
                 await target_channel.set_permissions(everyone_role, overwrite=overwrite, reason=audit_reason)
             except TypeError:
                 await interaction.response.send_message(
-                    "Esse tipo de canal nao aceita esse tipo de lockdown.",
+                    "Esse tipo de canal não aceita esse tipo de lockdown.",
                     ephemeral=True,
                 )
                 return
             except discord.Forbidden:
                 await interaction.response.send_message(
-                    "Nao tenho permissao para trancar esse canal.",
+                    "Não tenho permissão para trancar esse canal.",
                     ephemeral=True,
                 )
                 return
@@ -805,7 +805,7 @@ class ModerationCog(commands.Cog):
                 modlog_permission_line += "\nPermissao alterada: `@everyone -> Send Messages In Threads = False`"
             success_message = (
                 f"Lockdown aplicado em {target_channel.mention}. "
-                "O cargo `@everyone` nao pode mais enviar mensagens neste canal."
+                "O cargo `@everyone` não pode mais enviar mensagens neste canal."
             )
 
         try:
@@ -839,7 +839,7 @@ class ModerationCog(commands.Cog):
     @app_commands.checks.has_permissions(manage_nicknames=True)
     @app_commands.checks.bot_has_permissions(manage_nicknames=True)
     @app_commands.describe(
-        membro="Membro que tera o apelido alterado.",
+        membro="Membro que terá o apelido alterado.",
         novo_nome="Novo apelido (1 a 32 caracteres).",
     )
     async def nick(
@@ -852,7 +852,7 @@ class ModerationCog(commands.Cog):
         actor = interaction.user
         if guild is None or not isinstance(actor, discord.Member):
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -873,7 +873,7 @@ class ModerationCog(commands.Cog):
         old_nickname = membro.nick
         if old_nickname == clean_nickname:
             await interaction.response.send_message(
-                f"{membro.mention} ja esta com esse apelido.",
+                f"{membro.mention} já esta com esse apelido.",
                 ephemeral=True,
             )
             return
@@ -886,7 +886,7 @@ class ModerationCog(commands.Cog):
             await membro.edit(nick=clean_nickname, reason=audit_reason)
         except discord.Forbidden:
             await interaction.response.send_message(
-                "Nao consegui alterar o apelido desse membro por permissao/hierarquia.",
+                "Não consegui alterar o apelido desse membro por permissão/hierarquia.",
                 ephemeral=True,
             )
             return
@@ -946,7 +946,7 @@ class ModerationCog(commands.Cog):
         guild = interaction.guild
         if guild is None or not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -993,7 +993,7 @@ class ModerationCog(commands.Cog):
         guild = interaction.guild
         if guild is None or not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -1025,7 +1025,7 @@ class ModerationCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="unban", description="Remove o banimento de um usuario.")
+    @app_commands.command(name="unban", description="Remove o banimento de um usuário.")
     @app_commands.guild_only()
     @app_commands.default_permissions(ban_members=True)
     @app_commands.checks.has_permissions(ban_members=True)
@@ -1043,7 +1043,7 @@ class ModerationCog(commands.Cog):
         guild = interaction.guild
         if guild is None or not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -1060,7 +1060,7 @@ class ModerationCog(commands.Cog):
             ban_entry = await guild.fetch_ban(discord.Object(id=user_id))
         except discord.NotFound:
             await interaction.response.send_message(
-                "Esse usuario nao esta banido neste servidor.",
+                "Esse usuário não esta banido neste servidor.",
                 ephemeral=True,
             )
             return
@@ -1155,7 +1155,7 @@ class ModerationCog(commands.Cog):
         guild = interaction.guild
         if guild is None or not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -1167,7 +1167,7 @@ class ModerationCog(commands.Cog):
 
         if member.guild_permissions.administrator:
             await interaction.response.send_message(
-                "Nao e possivel aplicar timeout em administradores.",
+                "Não e possível aplicar timeout em administradores.",
                 ephemeral=True,
             )
             return
@@ -1175,7 +1175,7 @@ class ModerationCog(commands.Cog):
         timeout_duration = self._parse_duration(duration)
         if timeout_duration is None:
             await interaction.response.send_message(
-                "Duracao invalida. Use formatos como `30m`, `2h`, `1d` ou `45s`.",
+                "Duracao inválida. Use formatos como `30m`, `2h`, `1d` ou `45s`.",
                 ephemeral=True,
             )
             return
@@ -1183,7 +1183,7 @@ class ModerationCog(commands.Cog):
         max_timeout = timedelta(days=28)
         if timeout_duration > max_timeout:
             await interaction.response.send_message(
-                "A duracao maxima de timeout no Discord e de 28 dias.",
+                "A duração maxima de timeout no Discord e de 28 dias.",
                 ephemeral=True,
             )
             return
@@ -1208,7 +1208,7 @@ class ModerationCog(commands.Cog):
             color=discord.Color.dark_orange(),
         )
         await interaction.response.send_message(
-            f"{member.mention} ficou em timeout ate <t:{self._to_timestamp(timed_out_until)}:F>.",
+            f"{member.mention} ficou em timeout até <t:{self._to_timestamp(timed_out_until)}:F>.",
             ephemeral=True,
         )
 
@@ -1217,7 +1217,7 @@ class ModerationCog(commands.Cog):
     @app_commands.default_permissions(moderate_members=True)
     @app_commands.checks.has_permissions(moderate_members=True)
     @app_commands.checks.bot_has_permissions(moderate_members=True)
-    @app_commands.describe(member="Membro para remover o timeout.", reason="Motivo da remocao.")
+    @app_commands.describe(member="Membro para remover o timeout.", reason="Motivo da remoção.")
     async def untimeout(
         self,
         interaction: discord.Interaction,
@@ -1227,7 +1227,7 @@ class ModerationCog(commands.Cog):
         guild = interaction.guild
         if guild is None or not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -1240,7 +1240,7 @@ class ModerationCog(commands.Cog):
         now = discord.utils.utcnow()
         if member.timed_out_until is None or member.timed_out_until <= now:
             await interaction.response.send_message(
-                "Esse membro nao esta em timeout.",
+                "Esse membro não esta em timeout.",
                 ephemeral=True,
             )
             return
@@ -1281,7 +1281,7 @@ class ModerationCog(commands.Cog):
         guild = interaction.guild
         if guild is None or not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -1353,7 +1353,7 @@ class ModerationCog(commands.Cog):
     @app_commands.guild_only()
     @app_commands.default_permissions(moderate_members=True)
     @app_commands.checks.has_permissions(moderate_members=True)
-    @app_commands.describe(member="Membro para consultar historico de avisos.")
+    @app_commands.describe(member="Membro para consultar histórico de avisos.")
     async def warnings(
         self,
         interaction: discord.Interaction,
@@ -1362,7 +1362,7 @@ class ModerationCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -1386,7 +1386,7 @@ class ModerationCog(commands.Cog):
 
         if total == 0:
             await interaction.response.send_message(
-                f"{member.mention} nao possui avisos registrados.",
+                f"{member.mention} não possui avisos registrados.",
                 ephemeral=True,
             )
             return
@@ -1431,7 +1431,7 @@ class ModerationCog(commands.Cog):
     @app_commands.guild_only()
     @app_commands.default_permissions(moderate_members=True)
     @app_commands.checks.has_permissions(moderate_members=True)
-    @app_commands.describe(member="Membro que tera o historico limpo.")
+    @app_commands.describe(member="Membro que terá o histórico limpo.")
     async def clearwarnings(
         self,
         interaction: discord.Interaction,
@@ -1440,7 +1440,7 @@ class ModerationCog(commands.Cog):
         guild = interaction.guild
         if guild is None or not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -1468,7 +1468,7 @@ class ModerationCog(commands.Cog):
 
         if removed == 0:
             await interaction.response.send_message(
-                f"{member.mention} nao possui avisos para remover.",
+                f"{member.mention} não possui avisos para remover.",
                 ephemeral=True,
             )
             return
@@ -1493,7 +1493,7 @@ class ModerationCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="infractions", description="Mostra historico unificado de infracoes de um membro.")
+    @app_commands.command(name="infractions", description="Mostra histórico unificado de infrações de um membro.")
     @app_commands.guild_only()
     @app_commands.default_permissions(moderate_members=True)
     @app_commands.checks.has_permissions(moderate_members=True)
@@ -1510,7 +1510,7 @@ class ModerationCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -1527,14 +1527,14 @@ class ModerationCog(commands.Cog):
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
             await interaction.response.send_message(
-                "Falha ao consultar o historico de infracoes.",
+                "Falha ao consultar o histórico de infrações.",
                 ephemeral=True,
             )
             return
 
         if not rows:
             await interaction.response.send_message(
-                f"{member.mention} nao possui infracoes registradas.",
+                f"{member.mention} não possui infrações registradas.",
                 ephemeral=True,
             )
             return
@@ -1569,7 +1569,7 @@ class ModerationCog(commands.Cog):
         embed.set_footer(text=f"Mostrando {len(entries)} registro(s)")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="settings", description="Mostra as configuracoes de moderacao/automod da guild.")
+    @app_commands.command(name="settings", description="Mostra as configurações de moderação/automod da guild.")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -1577,7 +1577,7 @@ class ModerationCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -1590,7 +1590,7 @@ class ModerationCog(commands.Cog):
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
             await interaction.response.send_message(
-                "Falha ao ler configuracoes no banco de dados.",
+                "Falha ao ler configurações no banco de dados.",
                 ephemeral=True,
             )
             return
@@ -1605,14 +1605,14 @@ class ModerationCog(commands.Cog):
                 bypass_value += f" ... (+{len(bypass_roles) - 10})"
 
         embed = discord.Embed(
-            title=f"Configuracoes de moderacao: {guild.name}",
+            title=f"Configuracoes de moderação: {guild.name}",
             color=discord.Color.blurple(),
         )
         embed.add_field(
             name="Canais",
             value=(
-                f"Mod-log: {f'<#{modlog}>' if modlog else '`nao definido`'}\n"
-                f"AutoMod log: {f'<#{automodlog}>' if automodlog else '`nao definido`'}"
+                f"Mod-log: {f'<#{modlog}>' if modlog else '`não definido`'}\n"
+                f"AutoMod log: {f'<#{automodlog}>' if automodlog else '`não definido`'}"
             ),
             inline=False,
         )
@@ -1622,7 +1622,7 @@ class ModerationCog(commands.Cog):
                 f"Timeout em: `{settings['warn_timeout_threshold']}` warns ativos\n"
                 f"Ban em: `{settings['warn_ban_threshold']}` warns ativos\n"
                 f"Expiracao: `{settings['warn_expiration_days']}` dias (0 = nunca)\n"
-                f"Duracao do timeout automatico: `{self._format_minutes(settings['warn_timeout_duration_minutes'])}`"
+                f"Duracao do timeout automático: `{self._format_minutes(settings['warn_timeout_duration_minutes'])}`"
             ),
             inline=False,
         )
@@ -1654,7 +1654,7 @@ class ModerationCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -1670,14 +1670,14 @@ class ModerationCog(commands.Cog):
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
             await interaction.response.send_message(
-                "Falha ao atualizar configuracao no banco de dados.",
+                "Falha ao atualizar configuração no banco de dados.",
                 ephemeral=True,
             )
             return
 
         modlog = settings.get("mod_log_channel_id")
         await interaction.response.send_message(
-            f"Canal de mod-log atualizado: {f'<#{modlog}>' if modlog else '`nao definido`'}.",
+            f"Canal de mod-log atualizado: {f'<#{modlog}>' if modlog else '`não definido`'}.",
             ephemeral=True,
         )
 
@@ -1694,7 +1694,7 @@ class ModerationCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -1710,26 +1710,26 @@ class ModerationCog(commands.Cog):
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
             await interaction.response.send_message(
-                "Falha ao atualizar configuracao no banco de dados.",
+                "Falha ao atualizar configuração no banco de dados.",
                 ephemeral=True,
             )
             return
 
         automodlog = settings.get("automod_log_channel_id")
         await interaction.response.send_message(
-            f"Canal de log do AutoMod atualizado: {f'<#{automodlog}>' if automodlog else '`nao definido`'}.",
+            f"Canal de log do AutoMod atualizado: {f'<#{automodlog}>' if automodlog else '`não definido`'}.",
             ephemeral=True,
         )
 
-    @app_commands.command(name="setwarnpolicy", description="Configura escalonamento/expiracao de warns da guild.")
+    @app_commands.command(name="setwarnpolicy", description="Configura escalonamento/expiração de warns da guild.")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.checks.has_permissions(manage_guild=True)
     @app_commands.describe(
-        timeout_warns="Warns ativos para aplicar timeout automatico (0 desativa).",
-        ban_warns="Warns ativos para aplicar ban automatico (0 desativa).",
+        timeout_warns="Warns ativos para aplicar timeout automático (0 desativa).",
+        ban_warns="Warns ativos para aplicar ban automático (0 desativa).",
         expiration_days="Dias para expirar warn (0 = nunca expira).",
-        timeout_duration_minutes="Duracao do timeout automatico em minutos.",
+        timeout_duration_minutes="Duracao do timeout automático em minutos.",
     )
     async def setwarnpolicy(
         self,
@@ -1742,7 +1742,7 @@ class ModerationCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -1782,7 +1782,7 @@ class ModerationCog(commands.Cog):
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
             await interaction.response.send_message(
-                "Falha ao atualizar configuracao no banco de dados.",
+                "Falha ao atualizar configuração no banco de dados.",
                 ephemeral=True,
             )
             return
@@ -1793,7 +1793,7 @@ class ModerationCog(commands.Cog):
                 f"Timeout em: `{settings['warn_timeout_threshold']}` warns ativos\n"
                 f"Ban em: `{settings['warn_ban_threshold']}` warns ativos\n"
                 f"Expiracao: `{settings['warn_expiration_days']}` dias\n"
-                f"Timeout automatico: `{self._format_minutes(settings['warn_timeout_duration_minutes'])}`"
+                f"Timeout automático: `{self._format_minutes(settings['warn_timeout_duration_minutes'])}`"
             ),
             ephemeral=True,
         )
@@ -1827,7 +1827,7 @@ class ModerationCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -1869,7 +1869,7 @@ class ModerationCog(commands.Cog):
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
             await interaction.response.send_message(
-                "Falha ao atualizar configuracao no banco de dados.",
+                "Falha ao atualizar configuração no banco de dados.",
                 ephemeral=True,
             )
             return
@@ -1905,7 +1905,7 @@ class ModerationCog(commands.Cog):
     @app_commands.checks.bot_has_permissions(manage_roles=True)
     @app_commands.describe(
         role="Cargo para adicionar a todos os membros elegiveis.",
-        include_bots="Se true, inclui contas de bot tambem.",
+        include_bots="Se true, inclui contas de bot também.",
     )
     async def addroleall(
         self,
@@ -1917,14 +1917,14 @@ class ModerationCog(commands.Cog):
         actor = interaction.user
         if guild is None or not isinstance(actor, discord.Member):
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
 
         can_manage, reason = self._can_manage_role(guild, actor, role)
         if not can_manage:
-            await interaction.response.send_message(reason or "Nao foi possivel usar esse cargo.", ephemeral=True)
+            await interaction.response.send_message(reason or "Não foi possível usar esse cargo.", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -1932,7 +1932,7 @@ class ModerationCog(commands.Cog):
         members, used_api_listing = await self._collect_members_for_bulk(guild)
         if not members:
             await interaction.followup.send(
-                "Nao consegui listar membros para processar.",
+                "Não consegui listar membros para processar.",
                 ephemeral=True,
             )
             return
@@ -1988,7 +1988,7 @@ class ModerationCog(commands.Cog):
                 f"Ignorados (bots): `{skipped_bots}`\\n"
                 f"Ignorados (hierarquia do autor): `{skipped_actor_hierarchy}`\\n"
                 f"Ignorados (hierarquia do bot): `{skipped_bot_hierarchy}`\\n"
-                f"Falhas de API/permissao: `{failed}`"
+                f"Falhas de API/permissão: `{failed}`"
                 f"{note}"
             ),
             ephemeral=True,
@@ -2011,14 +2011,14 @@ class ModerationCog(commands.Cog):
 
         if not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message(
-                "Nao consegui validar suas permissoes neste servidor.",
+                "Não consegui validar suas permissões neste servidor.",
                 ephemeral=True,
             )
             return
 
         if not interaction.user.guild_permissions.manage_channels:
             await interaction.response.send_message(
-                "Voce precisa da permissao Gerenciar Canais.",
+                "Você precisa da permissão Gerenciar Canais.",
                 ephemeral=True,
             )
             return
@@ -2047,7 +2047,7 @@ class ModerationCog(commands.Cog):
         except discord.Forbidden:
             try:
                 await interaction.followup.send(
-                    "Nao tenho permissao suficiente para restaurar este canal.",
+                    "Não tenho permissão suficiente para restaurar este canal.",
                     ephemeral=True,
                 )
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
@@ -2079,7 +2079,7 @@ class ModerationCog(commands.Cog):
                 ),
             )
         except discord.HTTPException:
-            LOGGER.warning("Canal restaurado, mas nao foi possivel enviar aviso no novo canal.")
+            LOGGER.warning("Canal restaurado, mas não foi possível enviar aviso no novo canal.")
 
 
 async def setup(bot: commands.Bot) -> None:

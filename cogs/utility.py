@@ -24,281 +24,281 @@ ACTION_LABELS = {
     "timeout": "Timeout",
     "untimeout": "Untimeout",
     "clearwarnings": "Clear warnings",
-    "auto_timeout_warns": "Timeout automatico",
-    "auto_ban_warns": "Ban automatico",
+    "auto_timeout_warns": "Timeout automático",
+    "auto_ban_warns": "Ban automático",
 }
 
 COMMAND_DETAILS: dict[str, dict[str, str]] = {
     "help": {
         "categoria": "Utilitarios",
         "uso": "/help [comando]",
-        "permissoes": "Nenhuma",
+        "permissões": "Nenhuma",
         "escopo": "Servidor e DM",
-        "detalhes": "Mostra todos os comandos ou detalhes de um comando especifico.",
+        "detalhes": "Mostra todos os comandos ou detalhes de um comando específico.",
     },
     "ping": {
         "categoria": "Utilitarios",
         "uso": "/ping",
-        "permissoes": "Nenhuma",
+        "permissões": "Nenhuma",
         "escopo": "Servidor e DM",
-        "detalhes": "Exibe latencias, uptime, memoria, shards, cache, estado WS e contexto da guilda atual.",
+        "detalhes": "Exibe latências, uptime, memória, shards, cache, estado WS e contexto da guilda atual.",
     },
     "userinfo": {
         "categoria": "Utilitarios",
         "uso": "/userinfo [member]",
-        "permissoes": "Nenhuma",
+        "permissões": "Nenhuma",
         "escopo": "Apenas servidor",
-        "detalhes": "Mostra perfil completo com cargos, XP/rank, comandos usados e historico de moderacao.",
+        "detalhes": "Mostra perfil completo com cargos, XP/rank, comandos usados e histórico de moderação.",
     },
     "serverinfo": {
         "categoria": "Utilitarios",
         "uso": "/serverinfo",
-        "permissoes": "Nenhuma",
+        "permissões": "Nenhuma",
         "escopo": "Apenas servidor",
-        "detalhes": "Mostra ID, dono, membros, canais, cargos e data de criacao do servidor.",
+        "detalhes": "Mostra ID, dono, membros, canais, cargos e data de criação do servidor.",
     },
     "rank": {
         "categoria": "Utilitarios",
         "uso": "/rank [member]",
-        "permissoes": "Nenhuma",
+        "permissões": "Nenhuma",
         "escopo": "Apenas servidor",
-        "detalhes": "Gera um card em canvas com nivel, XP, posicao e progresso do membro.",
+        "detalhes": "Gera um card em canvas com nível, XP, posição e progresso do membro.",
     },
     "leaderboard": {
         "categoria": "Utilitarios",
         "uso": "/leaderboard [limit]",
-        "permissoes": "Nenhuma",
+        "permissões": "Nenhuma",
         "escopo": "Apenas servidor",
-        "detalhes": "Gera um canvas com o ranking de niveis do servidor por XP.",
+        "detalhes": "Gera um canvas com o ranking de níveis do servidor por XP.",
     },
     "music setup": {
         "categoria": "Musica",
         "uso": "/music setup",
-        "permissoes": "Nenhuma",
+        "permissões": "Nenhuma",
         "escopo": "Servidor e DM",
         "detalhes": "Diagnostica dependencias de audio: FFmpeg, endpoints YTMP3, PyNaCl e Davey.",
     },
     "music join": {
         "categoria": "Musica",
         "uso": "/music join",
-        "permissoes": "Connect + Speak (bot)",
+        "permissões": "Connect + Speak (bot)",
         "escopo": "Apenas servidor",
         "detalhes": "Conecta o bot no seu canal de voz atual.",
     },
     "music play": {
         "categoria": "Musica",
         "uso": "/music play <busca_ou_url>",
-        "permissoes": "Connect + Speak (bot)",
+        "permissões": "Connect + Speak (bot)",
         "escopo": "Apenas servidor",
-        "detalhes": "Busca uma musica (ou usa URL direta) e adiciona na fila.",
+        "detalhes": "Busca uma música (ou usa URL direta) e adiciona na fila.",
     },
     "music queue": {
         "categoria": "Musica",
         "uso": "/music queue [limite]",
-        "permissoes": "Nenhuma",
+        "permissões": "Nenhuma",
         "escopo": "Apenas servidor",
-        "detalhes": "Mostra a fila atual e as proximas faixas.",
+        "detalhes": "Mostra a fila atual e as próximas faixas.",
     },
     "music now": {
         "categoria": "Musica",
         "uso": "/music now",
-        "permissoes": "Nenhuma",
+        "permissões": "Nenhuma",
         "escopo": "Apenas servidor",
         "detalhes": "Mostra a faixa que esta tocando no momento.",
     },
     "music pause": {
         "categoria": "Musica",
         "uso": "/music pause",
-        "permissoes": "Estar no mesmo canal de voz do bot",
+        "permissões": "Estar no mesmo canal de voz do bot",
         "escopo": "Apenas servidor",
-        "detalhes": "Pausa a reproducao atual.",
+        "detalhes": "Pausa a reprodução atual.",
     },
     "music resume": {
         "categoria": "Musica",
         "uso": "/music resume",
-        "permissoes": "Estar no mesmo canal de voz do bot",
+        "permissões": "Estar no mesmo canal de voz do bot",
         "escopo": "Apenas servidor",
         "detalhes": "Retoma uma faixa pausada.",
     },
     "music skip": {
         "categoria": "Musica",
         "uso": "/music skip",
-        "permissoes": "Estar no mesmo canal de voz do bot",
+        "permissões": "Estar no mesmo canal de voz do bot",
         "escopo": "Apenas servidor",
-        "detalhes": "Pula para a proxima faixa da fila.",
+        "detalhes": "Pula para a próxima faixa da fila.",
     },
     "music stop": {
         "categoria": "Musica",
         "uso": "/music stop",
-        "permissoes": "Estar no mesmo canal de voz do bot",
+        "permissões": "Estar no mesmo canal de voz do bot",
         "escopo": "Apenas servidor",
-        "detalhes": "Para a musica atual e limpa toda a fila.",
+        "detalhes": "Para a música atual e limpa toda a fila.",
     },
     "music leave": {
         "categoria": "Musica",
         "uso": "/music leave",
-        "permissoes": "Estar no mesmo canal de voz do bot",
+        "permissões": "Estar no mesmo canal de voz do bot",
         "escopo": "Apenas servidor",
         "detalhes": "Desconecta o bot do canal e limpa a fila.",
     },
     "music volume": {
         "categoria": "Musica",
         "uso": "/music volume <valor>",
-        "permissoes": "Estar no mesmo canal de voz do bot",
+        "permissões": "Estar no mesmo canal de voz do bot",
         "escopo": "Apenas servidor",
         "detalhes": "Ajusta o volume de 0% a 200%.",
     },
     "nekosia": {
         "categoria": "Imagens",
         "uso": "/nekosia [category] [count] [additional_tags] [blacklisted_tags] [rating]",
-        "permissoes": "Nenhuma",
+        "permissões": "Nenhuma",
         "escopo": "Servidor e DM",
         "detalhes": "Busca imagens da API NekoSia por categoria com filtros opcionais.",
     },
     "nekosia_id": {
         "categoria": "Imagens",
         "uso": "/nekosia_id <image_id>",
-        "permissoes": "Nenhuma",
+        "permissões": "Nenhuma",
         "escopo": "Servidor e DM",
-        "detalhes": "Busca uma imagem especifica da API NekoSia pelo ID.",
+        "detalhes": "Busca uma imagem específica da API NekoSia pelo ID.",
     },
     "nekosia_tags": {
         "categoria": "Imagens",
         "uso": "/nekosia_tags [tipo] [termo]",
-        "permissoes": "Nenhuma",
+        "permissões": "Nenhuma",
         "escopo": "Servidor e DM",
-        "detalhes": "Lista tags, animes ou personagens disponiveis na API NekoSia.",
+        "detalhes": "Lista tags, animes ou personagens disponíveis na API NekoSia.",
     },
     "clear": {
         "categoria": "Moderacao",
         "uso": "/clear <amount>",
-        "permissoes": "Manage Messages",
+        "permissões": "Manage Messages",
         "escopo": "Apenas servidor",
         "detalhes": "Apaga de 1 a 100 mensagens no canal atual.",
     },
     "slowmode": {
         "categoria": "Moderacao",
         "uso": "/slowmode <tempo> [canal]",
-        "permissoes": "Manage Channels",
+        "permissões": "Manage Channels",
         "escopo": "Apenas servidor",
-        "detalhes": "Ajusta o cooldown em canal de texto, thread ou forum.",
+        "detalhes": "Ajusta o cooldown em canal de texto, thread ou fórum.",
     },
     "lockdown": {
         "categoria": "Moderacao",
         "uso": "/lockdown [canal] [motivo]",
-        "permissoes": "Manage Channels",
+        "permissões": "Manage Channels",
         "escopo": "Apenas servidor",
-        "detalhes": "Tranca canal (texto/forum/voice/stage) e bloqueia thread com modo de emergencia.",
+        "detalhes": "Tranca canal (texto/fórum/voice/stage) e bloqueia thread com modo de emergência.",
     },
     "nick": {
         "categoria": "Moderacao",
         "uso": "/nick <membro> <novo_nome>",
-        "permissoes": "Manage Nicknames",
+        "permissões": "Manage Nicknames",
         "escopo": "Apenas servidor",
-        "detalhes": "Altera forcadamente o apelido de um membro no servidor.",
+        "detalhes": "Altera forçadamente o apelido de um membro no servidor.",
     },
     "kick": {
         "categoria": "Moderacao",
         "uso": "/kick <member> [reason]",
-        "permissoes": "Kick Members",
+        "permissões": "Kick Members",
         "escopo": "Apenas servidor",
         "detalhes": "Expulsa um membro respeitando hierarquia de cargos.",
     },
     "ban": {
         "categoria": "Moderacao",
         "uso": "/ban <member> [reason]",
-        "permissoes": "Ban Members",
+        "permissões": "Ban Members",
         "escopo": "Apenas servidor",
         "detalhes": "Bane um membro respeitando hierarquia de cargos.",
     },
     "unban": {
         "categoria": "Moderacao",
         "uso": "/unban <usuario_banido_ou_id> [reason]",
-        "permissoes": "Ban Members",
+        "permissões": "Ban Members",
         "escopo": "Apenas servidor",
         "detalhes": "Remove o banimento via autocomplete de banidos ou por ID.",
     },
     "timeout": {
         "categoria": "Moderacao",
         "uso": "/timeout <member> <duration> [reason]",
-        "permissoes": "Moderate Members",
+        "permissões": "Moderate Members",
         "escopo": "Apenas servidor",
-        "detalhes": "Aplica timeout com duracao em `s`, `m`, `h` ou `d`.",
+        "detalhes": "Aplica timeout com duração em `s`, `m`, `h` ou `d`.",
     },
     "untimeout": {
         "categoria": "Moderacao",
         "uso": "/untimeout <member> [reason]",
-        "permissoes": "Moderate Members",
+        "permissões": "Moderate Members",
         "escopo": "Apenas servidor",
         "detalhes": "Remove o timeout ativo de um membro.",
     },
     "warn": {
         "categoria": "Moderacao",
         "uso": "/warn <member> <reason>",
-        "permissoes": "Moderate Members",
+        "permissões": "Moderate Members",
         "escopo": "Apenas servidor",
-        "detalhes": "Registra um aviso no historico do membro (MySQL).",
+        "detalhes": "Registra um aviso no histórico do membro (MySQL).",
     },
     "warnings": {
         "categoria": "Moderacao",
         "uso": "/warnings <member>",
-        "permissoes": "Moderate Members",
+        "permissões": "Moderate Members",
         "escopo": "Apenas servidor",
         "detalhes": "Mostra warns ativos/expirados do membro.",
     },
     "clearwarnings": {
         "categoria": "Moderacao",
         "uso": "/clearwarnings <member>",
-        "permissoes": "Moderate Members",
+        "permissões": "Moderate Members",
         "escopo": "Apenas servidor",
         "detalhes": "Remove todos os avisos registrados de um membro.",
     },
     "infractions": {
         "categoria": "Moderacao",
         "uso": "/infractions <member> [limit]",
-        "permissoes": "Moderate Members",
+        "permissões": "Moderate Members",
         "escopo": "Apenas servidor",
         "detalhes": "Historico unificado de punicoes e eventos do AutoMod.",
     },
     "settings": {
         "categoria": "Moderacao",
         "uso": "/settings",
-        "permissoes": "Manage Guild",
+        "permissões": "Manage Guild",
         "escopo": "Apenas servidor",
-        "detalhes": "Mostra configuracoes de warns, AutoMod e canais de log.",
+        "detalhes": "Mostra configurações de warns, AutoMod e canais de log.",
     },
     "setmodlog": {
         "categoria": "Moderacao",
         "uso": "/setmodlog [channel]",
-        "permissoes": "Manage Guild",
+        "permissões": "Manage Guild",
         "escopo": "Apenas servidor",
         "detalhes": "Define/limpa canal de mod-log.",
     },
     "setautomodlog": {
         "categoria": "Moderacao",
         "uso": "/setautomodlog [channel]",
-        "permissoes": "Manage Guild",
+        "permissões": "Manage Guild",
         "escopo": "Apenas servidor",
-        "detalhes": "Define/limpa canal de log especifico do AutoMod.",
+        "detalhes": "Define/limpa canal de log específico do AutoMod.",
     },
     "setwarnpolicy": {
         "categoria": "Moderacao",
         "uso": "/setwarnpolicy [timeout_warns] [ban_warns] [expiration_days] [timeout_duration_minutes]",
-        "permissoes": "Manage Guild",
+        "permissões": "Manage Guild",
         "escopo": "Apenas servidor",
-        "detalhes": "Configura escalonamento automatico e expiracao de warns.",
+        "detalhes": "Configura escalonamento automático e expiração de warns.",
     },
     "setautomod": {
         "categoria": "Moderacao",
         "uso": "/setautomod [enabled] [anti_spam] [anti_link] [anti_mention_flood] ...",
-        "permissoes": "Manage Guild",
+        "permissões": "Manage Guild",
         "escopo": "Apenas servidor",
         "detalhes": "Configura regras, limites e bypass roles do AutoMod.",
     },
     "restaurar": {
         "categoria": "Moderacao",
         "uso": "/restaurar",
-        "permissoes": "Manage Channels + dono do sistema (DONO_ID)",
+        "permissões": "Manage Channels + dono do sistema (DONO_ID)",
         "escopo": "Apenas servidor",
         "detalhes": "Recria o canal atual com mesmo nome/tipo para limpar mensagens.",
     },
@@ -331,7 +331,7 @@ class UtilityCog(commands.Cog):
     def _warn_store(self):
         warn_store = getattr(self.bot, "warn_store", None)
         if warn_store is None:
-            raise RuntimeError("WarnStore nao inicializado.")
+            raise RuntimeError("WarnStore não inicializado.")
         return warn_store
 
     @staticmethod
@@ -418,7 +418,7 @@ class UtilityCog(commands.Cog):
     async def _system_owner_profile(self) -> str:
         owner_id = self.bot.owner_id
         if owner_id is None:
-            return "Nao configurado. Defina `DONO_ID` no `.env`."
+            return "Não configurado. Defina `DONO_ID` no `.env`."
 
         owner = self._cached_owner if self._cached_owner and self._cached_owner.id == owner_id else None
         if owner is None:
@@ -427,7 +427,7 @@ class UtilityCog(commands.Cog):
             try:
                 owner = await self.bot.fetch_user(owner_id)
             except discord.HTTPException:
-                return f"ID: `{owner_id}`\nNao foi possivel carregar o perfil agora."
+                return f"ID: `{owner_id}`\nNao foi possível carregar o perfil agora."
 
         self._cached_owner = owner
         display_name = owner.global_name or owner.name
@@ -438,7 +438,7 @@ class UtilityCog(commands.Cog):
             f"Criado em: {ts(owner.created_at)}"
         )
 
-    @app_commands.command(name="ping", description="Mostra a latencia atual do bot.")
+    @app_commands.command(name="ping", description="Mostra a latência atual do bot.")
     async def ping(self, interaction: discord.Interaction) -> None:
         now = discord.utils.utcnow()
         latency_ms = round(self.bot.latency * 1000)
@@ -474,12 +474,12 @@ class UtilityCog(commands.Cog):
 
         embed = discord.Embed(
             title="Pong!",
-            description="Status atual da conexao do bot.",
+            description="Status atual da conexão do bot.",
             color=discord.Color.green(),
             timestamp=now,
         )
         embed.add_field(name="Latencia gateway", value=f"`{latency_ms}ms`", inline=True)
-        embed.add_field(name="Atraso da interacao", value=f"`{interaction_delay_ms}ms`", inline=True)
+        embed.add_field(name="Atraso da interação", value=f"`{interaction_delay_ms}ms`", inline=True)
         embed.add_field(name="Uptime", value=f"`{self._format_uptime(uptime_seconds)}`", inline=True)
         embed.add_field(name="Shard", value=f"`{shard_label}`", inline=True)
         embed.add_field(name="Servidores", value=f"`{guild_count}`", inline=True)
@@ -501,7 +501,7 @@ class UtilityCog(commands.Cog):
 
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="help", description="Lista os comandos disponiveis.")
+    @app_commands.command(name="help", description="Lista os comandos disponíveis.")
     @app_commands.describe(comando="Nome do comando para ver detalhes. Ex.: kick")
     async def help(self, interaction: discord.Interaction, comando: str | None = None) -> None:
         slash_commands = self._slash_commands()
@@ -512,7 +512,7 @@ class UtilityCog(commands.Cog):
             target = command_index.get(lookup)
             if target is None:
                 await interaction.response.send_message(
-                    f"Comando `{lookup}` nao encontrado. Use `/help` para ver a lista.",
+                    f"Comando `{lookup}` não encontrado. Use `/help` para ver a lista.",
                     ephemeral=True,
                 )
                 return
@@ -535,12 +535,12 @@ class UtilityCog(commands.Cog):
             )
             embed.add_field(
                 name="Escopo",
-                value=details.get("escopo", "Nao informado"),
+                value=details.get("escopo", "Não informado"),
                 inline=True,
             )
             embed.add_field(
                 name="Permissoes",
-                value=details.get("permissoes", "Nao informado"),
+                value=details.get("permissões", "Não informado"),
                 inline=False,
             )
             embed.add_field(
@@ -558,7 +558,7 @@ class UtilityCog(commands.Cog):
                 commands_by_category[category] = []
             details = COMMAND_DETAILS.get(cmd.qualified_name, {})
             usage = details.get("uso", f"/{cmd.qualified_name}")
-            perms = details.get("permissoes", "Nenhuma")
+            perms = details.get("permissões", "Nenhuma")
             commands_by_category[category].append(f"`{usage}`\nPermissoes: `{perms}`")
 
         embed = discord.Embed(
@@ -608,9 +608,9 @@ class UtilityCog(commands.Cog):
         filtered = [name for name in names if current_normalized in name.lower()]
         return [app_commands.Choice(name=f"/{name}", value=name) for name in filtered[:25]]
 
-    @app_commands.command(name="userinfo", description="Mostra informacoes de um usuario.")
+    @app_commands.command(name="userinfo", description="Mostra informações de um usuário.")
     @app_commands.guild_only()
-    @app_commands.describe(member="Membro para consultar. Se vazio, usa voce.")
+    @app_commands.describe(member="Membro para consultar. Se vazio, usa você.")
     async def userinfo(
         self,
         interaction: discord.Interaction,
@@ -619,7 +619,7 @@ class UtilityCog(commands.Cog):
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
@@ -627,7 +627,7 @@ class UtilityCog(commands.Cog):
         if member is None:
             if not isinstance(interaction.user, discord.Member):
                 await interaction.response.send_message(
-                    "Nao consegui ler os dados do usuario neste servidor.",
+                    "Não consegui ler os dados do usuário neste servidor.",
                     ephemeral=True,
                 )
                 return
@@ -649,7 +649,7 @@ class UtilityCog(commands.Cog):
         level_profile: dict | None
         if isinstance(level_result, Exception):
             LOGGER.error(
-                "Falha ao consultar nivel/rank no /userinfo.",
+                "Falha ao consultar nível/rank no /userinfo.",
                 exc_info=(type(level_result), level_result, level_result.__traceback__),
             )
             level_profile = None
@@ -659,7 +659,7 @@ class UtilityCog(commands.Cog):
         moderation_overview: dict[str, object] | None
         if isinstance(moderation_result, Exception):
             LOGGER.error(
-                "Falha ao consultar moderacao no /userinfo.",
+                "Falha ao consultar moderação no /userinfo.",
                 exc_info=(type(moderation_result), moderation_result, moderation_result.__traceback__),
             )
             moderation_overview = None
@@ -702,7 +702,7 @@ class UtilityCog(commands.Cog):
             value=(
                 f"Maior cargo: {member.top_role.mention}\n"
                 f"Quantidade de cargos: `{len(member.roles) - 1}`\n"
-                f"Premium/Booster: `{'Sim' if member.premium_since else 'Nao'}`\n"
+                f"Premium/Booster: `{'Sim' if member.premium_since else 'Não'}`\n"
                 f"Timeout: `{timeout_text}`"
             ),
             inline=False,
@@ -750,7 +750,7 @@ class UtilityCog(commands.Cog):
         embed.add_field(name="Comandos usados", value=command_value, inline=False)
 
         if not moderation_overview:
-            moderation_value = "Sem dados de moderacao disponiveis."
+            moderation_value = "Sem dados de moderação disponíveis."
         else:
             warnings_total = int(moderation_overview.get("warnings_total", 0))
             warnings_active = int(moderation_overview.get("warnings_active", 0))
@@ -797,13 +797,13 @@ class UtilityCog(commands.Cog):
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="serverinfo", description="Mostra informacoes do servidor atual.")
+    @app_commands.command(name="serverinfo", description="Mostra informações do servidor atual.")
     @app_commands.guild_only()
     async def serverinfo(self, interaction: discord.Interaction) -> None:
         guild = interaction.guild
         if guild is None:
             await interaction.response.send_message(
-                "Este comando so funciona em servidor.",
+                "Este comando só funciona em servidor.",
                 ephemeral=True,
             )
             return
