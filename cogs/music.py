@@ -444,6 +444,56 @@ class MusicCog(commands.Cog):
             return int(number * 1000)
         return None
 
+    def _extract_thumbnail_url(self, payload: dict[str, Any]) -> str | None:
+        direct_keys = (
+            "thumbnail",
+            "thumbnail_url",
+            "thumbnailUrl",
+            "thumb",
+            "cover",
+            "image",
+            "image_url",
+            "imageUrl",
+        )
+        for key in direct_keys:
+            value = payload.get(key)
+            if isinstance(value, str) and self._is_url(value.strip()):
+                return value.strip()
+
+        thumbnails = payload.get("thumbnails")
+        if isinstance(thumbnails, list):
+            for item in thumbnails:
+                if not isinstance(item, dict):
+                    continue
+                for key in ("url", "src", "thumbnail", "thumbnailUrl"):
+                    value = item.get(key)
+                    if isinstance(value, str) and self._is_url(value.strip()):
+                        return value.strip()
+
+        if isinstance(thumbnails, dict):
+            for key in ("url", "src"):
+                value = thumbnails.get(key)
+                if isinstance(value, str) and self._is_url(value.strip()):
+                    return value.strip()
+
+            for quality_key in ("default", "medium", "high", "maxres", "standard"):
+                candidate = thumbnails.get(quality_key)
+                if isinstance(candidate, str) and self._is_url(candidate.strip()):
+                    return candidate.strip()
+                if isinstance(candidate, dict):
+                    value = candidate.get("url") or candidate.get("src")
+                    if isinstance(value, str) and self._is_url(value.strip()):
+                        return value.strip()
+
+        return None
+
+    @staticmethod
+    def _youtube_thumbnail_from_video_id(video_id: str) -> str | None:
+        normalized = video_id.strip()
+        if not YOUTUBE_ID_RE.fullmatch(normalized):
+            return None
+        return f"https://i.ytimg.com/vi/{normalized}/hqdefault.jpg"
+
     def _cache_expiration_for_track(self, track: QueueTrack) -> float:
         now = time.time()
         expires_at = now + LOCAL_RESOLVE_CACHE_TTL_SECONDS
@@ -701,16 +751,14 @@ class MusicCog(commands.Cog):
                 title_value = status_payload.get("title") or create_payload.get("title")
                 title = str(title_value).strip() if isinstance(title_value, str) and str(title_value).strip() else "Faixa desconhecida"
 
-                thumb_value = create_payload.get("thumbnail") or create_payload.get("thumbnailUrl")
-                thumbnail_url = thumb_value.strip() if isinstance(thumb_value, str) and self._is_url(thumb_value.strip()) else None
-
                 duration_ms: int | None = None
                 for candidate_duration in (status_payload.get("duration"), create_payload.get("duration")):
                     duration_ms = self._duration_to_ms(candidate_duration)
                     if duration_ms is not None:
                         break
 
-                identifier = self._extract_youtube_video_id(resolved_link) or ""
+                video_id = self._extract_youtube_video_id(resolved_link) or ""
+                identifier = video_id
                 if not identifier:
                     try:
                         parsed_status = urlparse(status_url)
@@ -719,6 +767,12 @@ class MusicCog(commands.Cog):
                             identifier = status_parts[-1]
                     except Exception:
                         identifier = ""
+
+                thumbnail_url = (
+                    self._extract_thumbnail_url(status_payload)
+                    or self._extract_thumbnail_url(create_payload)
+                    or self._youtube_thumbnail_from_video_id(video_id)
+                )
 
                 stream_expires_at = self._extract_stream_expires_at(stream_url)
                 if stream_expires_at <= 0:
