@@ -4,7 +4,7 @@ module.exports = {
       name: "ayana-bot",
       cwd: "/root/ayana-bot",
       script: "main.py",
-      interpreter: "/root/ayana-bot/venv/bin/python",
+      interpreter: "/root/ayana-bot/.venv/bin/python",
       autorestart: true,
       watch: false,
       max_restarts: 10,

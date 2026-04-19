@@ -227,18 +227,29 @@ class AyanaBot(commands.Bot):
             if self.sync_guild_id:
                 guild = discord.Object(id=self.sync_guild_id)
                 self.tree.copy_global_to(guild=guild)
-                synced = await self.tree.sync(guild=guild)
-                removed_globals = await self._delete_overlapping_global_commands()
-                LOGGER.info(
-                    "Comandos sincronizados na guild %s: %s",
-                    self.sync_guild_id,
-                    len(synced),
-                )
-                if removed_globals:
-                    LOGGER.info(
-                        "Comandos globais removidos para evitar duplicação na guild: %s",
-                        removed_globals,
+                try:
+                    synced = await self.tree.sync(guild=guild)
+                except discord.Forbidden:
+                    LOGGER.warning(
+                        "Sem acesso para sincronizar comandos na guild %s (Forbidden). "
+                        "Verifique se o bot está no servidor e foi convidado com escopo "
+                        "'applications.commands'. Aplicando fallback para sincronização global.",
+                        self.sync_guild_id,
                     )
+                    synced = await self.tree.sync()
+                    LOGGER.info("Comandos globais sincronizados (fallback): %s", len(synced))
+                else:
+                    removed_globals = await self._delete_overlapping_global_commands()
+                    LOGGER.info(
+                        "Comandos sincronizados na guild %s: %s",
+                        self.sync_guild_id,
+                        len(synced),
+                    )
+                    if removed_globals:
+                        LOGGER.info(
+                            "Comandos globais removidos para evitar duplicação na guild: %s",
+                            removed_globals,
+                        )
             else:
                 synced = await self.tree.sync()
                 LOGGER.info("Comandos globais sincronizados: %s", len(synced))
